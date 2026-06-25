@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from gnews_mcp_server import mcp as gnews_mcp_server
 from email_mcp import mcp as email_mcp_server
 import contextlib
+import os
 import uvicorn
 
 @contextlib.asynccontextmanager
@@ -32,4 +33,5 @@ app.mount("/gnews", gnews_mcp_server.streamable_http_app(), name="GNews MCP Serv
 app.mount("/email", email_mcp_server.streamable_http_app(), name="Email MCP Server")
 
 if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=10000, log_level="info")
+    port = int(os.getenv("PORT", 10000))
+    uvicorn.run(app, host="0.0.0.0", port=port, proxy_headers=True, forwarded_allow_ips="*")
