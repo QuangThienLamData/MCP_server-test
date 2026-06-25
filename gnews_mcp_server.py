@@ -3,13 +3,17 @@ from typing import Optional
 from dotenv import load_dotenv
 import requests
 from mcp.server.fastmcp import FastMCP
+from mcp.server.transport_security import TransportSecuritySettings
 
 load_dotenv()
 
 API_KEY = os.getenv("API_KEY")
 BASE_URL = "https://gnews.io/api/v4"
 
-mcp = FastMCP(name="GNews MCP Server")
+mcp = FastMCP(
+    name="GNews MCP Server",
+    transport_security=TransportSecuritySettings(enable_dns_rebinding_protection=False),
+)
 
 
 @mcp.tool()

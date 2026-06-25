@@ -3,10 +3,14 @@ from typing import Optional
 from dotenv import load_dotenv
 import requests
 from mcp.server.fastmcp import FastMCP
+from mcp.server.transport_security import TransportSecuritySettings
 
 load_dotenv()
 
-mcp = FastMCP(name="Email MCP Server")
+mcp = FastMCP(
+    name="Email MCP Server",
+    transport_security=TransportSecuritySettings(enable_dns_rebinding_protection=False),
+)
 
 
 @mcp.tool()
