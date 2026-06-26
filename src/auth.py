@@ -1,3 +1,4 @@
+import base64
 import json
 import logging
 from fastapi import HTTPException, Request
@@ -31,6 +32,16 @@ class AuthMiddleware(BaseHTTPMiddleware):
                 raise HTTPException(status_code=401, detail="Missing or invalid authorization header")
 
             token = auth_header.split(" ")[1]
+
+            # Debug: log token claims to find audience mismatch
+            try:
+                payload_part = token.split(".")[1]
+                payload_part += "=" * (4 - len(payload_part) % 4)
+                claims = json.loads(base64.urlsafe_b64decode(payload_part))
+                logger.info(f"Token aud: {claims.get('aud')}, iss: {claims.get('iss')}")
+                logger.info(f"Expected aud: {settings.SCALEKIT_AUDIENCE_NAME}")
+            except Exception:
+                logger.warning("Could not decode token for debugging")
 
             validation_options = TokenValidationOptions(
                 issuer=settings.SCALEKIT_ENVIRONMENT_URL,
