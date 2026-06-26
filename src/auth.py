@@ -58,7 +58,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
                     request_data = {}
 
                 if request_data.get("method") == "tools/call":
-                    validation_options.required_scopes = ["mcp:tools:search:read"]
+                    validation_options.required_scopes = ["search:read"]
 
             scalekit_client.validate_token(token, options=validation_options)
 
