@@ -43,9 +43,10 @@ class AuthMiddleware(BaseHTTPMiddleware):
             except Exception:
                 logger.warning("Could not decode token for debugging")
 
+            audience_name = settings.SCALEKIT_AUDIENCE_NAME.rstrip("/")
             validation_options = TokenValidationOptions(
                 issuer=settings.SCALEKIT_ENVIRONMENT_URL,
-                audience=[settings.SCALEKIT_AUDIENCE_NAME],
+                audience=[audience_name, audience_name + "/", settings.SCALEKIT_RESOURCE_IDENTIFIER],
             )
 
             # Only parse body for POST requests (JSON-RPC calls)
