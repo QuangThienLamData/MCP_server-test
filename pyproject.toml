@@ -9,4 +9,5 @@ dependencies = [
     "requests>=2.34.2",
     "python-dotenv>=1.0.0",
     "fastapi>=0.138.0",
+    "scalekit-sdk-python>=2.12.0",
 ]

@@ -6,28 +6,59 @@ import contextlib
 import os
 import uvicorn
 
+from src.auth import AuthMiddleware
+from src.config import settings
+
+BASE_URL = settings.SCALEKIT_RESOURCE_DOCS_URL.rsplit("/gnews/mcp", 1)[0]
+
+GNEWS_METADATA = {
+    "resource": f"{BASE_URL}/gnews/mcp",
+    "authorization_servers": [settings.SCALEKIT_AUTHORIZATION_SERVERS],
+    "bearer_methods_supported": ["header"],
+    "resource_documentation": f"{BASE_URL}/gnews/mcp/docs",
+    "scopes_supported": ["search:read"],
+}
+
+EMAIL_METADATA = {
+    "resource": f"{BASE_URL}/email/mcp",
+    "authorization_servers": [settings.SCALEKIT_AUTHORIZATION_SERVERS],
+    "bearer_methods_supported": ["header"],
+    "resource_documentation": f"{BASE_URL}/email/mcp/docs",
+    "scopes_supported": ["search:read"],
+}
+
+
 @contextlib.asynccontextmanager
 async def lifespan(app: FastAPI):
-    # async with gnews_mcp_server.session_manager.run():
-    async with  contextlib.AsyncExitStack() as stack:
+    async with contextlib.AsyncExitStack() as stack:
         await stack.enter_async_context(gnews_mcp_server.session_manager.run())
         await stack.enter_async_context(email_mcp_server.session_manager.run())
-        # Startup code
-        print("Starting up the GNews MCP Server...")
+        print("Starting up MCP Servers...")
         yield
-        # Shutdown code
-        print("Shutting down the GNews MCP Server...")
+        print("Shutting down MCP Servers...")
 
-app = FastAPI(title="GNews MCP Server", version="1.0.0", lifespan=lifespan)
+app = FastAPI(title="MCP Server", version="1.0.0", lifespan=lifespan)
 
-#CORS middleware configuration
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Allow all origins for simplicity; adjust as needed for production
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.get("/.well-known/oauth-protected-resource/gnews/mcp")
+async def gnews_oauth_metadata():
+    return GNEWS_METADATA
+
+
+@app.get("/.well-known/oauth-protected-resource/email/mcp")
+async def email_oauth_metadata():
+    return EMAIL_METADATA
+
+
+app.add_middleware(AuthMiddleware)
 
 app.mount("/gnews", gnews_mcp_server.streamable_http_app(), name="GNews MCP Server")
 app.mount("/email", email_mcp_server.streamable_http_app(), name="Email MCP Server")

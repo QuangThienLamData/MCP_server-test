@@ -7,7 +7,7 @@ from mcp.server.transport_security import TransportSecuritySettings
 
 load_dotenv()
 
-API_KEY = os.getenv("API_KEY")
+API_KEY = os.getenv("GNEWS_API_KEY")
 BASE_URL = "https://gnews.io/api/v4"
 
 mcp = FastMCP(
