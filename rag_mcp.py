@@ -5,7 +5,7 @@ import tempfile
 import threading
 
 import chromadb
-from chromadb.utils.embedding_functions import SentenceTransformerEmbeddingFunction
+from chromadb.utils.embedding_functions import DefaultEmbeddingFunction
 from dotenv import load_dotenv
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
@@ -28,7 +28,7 @@ mcp = FastMCP(
 )
 
 _chroma_client = chromadb.PersistentClient(path="./chroma_db")
-_embedding_fn = SentenceTransformerEmbeddingFunction(model_name="all-MiniLM-L6-v2")
+_embedding_fn = DefaultEmbeddingFunction()
 
 
 def get_drive_service():
