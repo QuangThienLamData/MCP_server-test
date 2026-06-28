@@ -2,6 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from gnews_mcp_server import mcp as gnews_mcp_server
 from email_mcp import mcp as email_mcp_server
+from rag_mcp import mcp as rag_mcp_server, auto_ingest_on_startup
 import contextlib
 import os
 import uvicorn
@@ -27,13 +28,23 @@ EMAIL_METADATA = {
     "scopes_supported": ["search:read"],
 }
 
+RAG_METADATA = {
+    "resource": f"{BASE_URL}/rag/mcp",
+    "authorization_servers": [settings.SCALEKIT_AUTHORIZATION_SERVERS],
+    "bearer_methods_supported": ["header"],
+    "resource_documentation": f"{BASE_URL}/rag/mcp/docs",
+    "scopes_supported": ["search:read"],
+}
+
 
 @contextlib.asynccontextmanager
 async def lifespan(app: FastAPI):
     async with contextlib.AsyncExitStack() as stack:
         await stack.enter_async_context(gnews_mcp_server.session_manager.run())
         await stack.enter_async_context(email_mcp_server.session_manager.run())
+        await stack.enter_async_context(rag_mcp_server.session_manager.run())
         print("Starting up MCP Servers...")
+        auto_ingest_on_startup()
         yield
         print("Shutting down MCP Servers...")
 
@@ -58,10 +69,16 @@ async def email_oauth_metadata():
     return EMAIL_METADATA
 
 
+@app.get("/.well-known/oauth-protected-resource/rag/mcp")
+async def rag_oauth_metadata():
+    return RAG_METADATA
+
+
 app.add_middleware(AuthMiddleware)
 
 app.mount("/gnews", gnews_mcp_server.streamable_http_app(), name="GNews MCP Server")
 app.mount("/email", email_mcp_server.streamable_http_app(), name="Email MCP Server")
+app.mount("/rag", rag_mcp_server.streamable_http_app(), name="RAG MCP Server")
 
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 10000))

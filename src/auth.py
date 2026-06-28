@@ -55,6 +55,8 @@ class AuthMiddleware(BaseHTTPMiddleware):
             # Determine which metadata URL to reference based on path
             if request.url.path.startswith("/email"):
                 metadata_url = f"{BASE_URL}/.well-known/oauth-protected-resource/email/mcp"
+            elif request.url.path.startswith("/rag"):
+                metadata_url = f"{BASE_URL}/.well-known/oauth-protected-resource/rag/mcp"
             else:
                 metadata_url = f"{BASE_URL}/.well-known/oauth-protected-resource/gnews/mcp"
 
