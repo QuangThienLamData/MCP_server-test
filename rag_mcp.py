@@ -3,6 +3,8 @@ import logging
 import os
 import tempfile
 import threading
+import time
+import urllib.request
 
 import chromadb
 from chromadb.utils.embedding_functions import DefaultEmbeddingFunction
@@ -79,8 +81,26 @@ def download_single_file(file_id: str, file_name: str, dest_dir: str, service=No
     return file_path
 
 
+RENDER_SELF_URL = os.getenv("RENDER_EXTERNAL_URL", "")
+
+
+def _keep_alive_loop():
+    """Ping the server every 5 minutes to prevent Render free tier spin-down."""
+    url = RENDER_SELF_URL or "http://localhost:10000"
+    while _ingest_status["running"]:
+        try:
+            urllib.request.urlopen(url, timeout=10)
+        except Exception:
+            pass
+        time.sleep(300)
+
+
 def _ingest_files_background(folder_id: str, recursive: bool):
     """Background worker: download and ingest files one by one."""
+    # Start keep-alive pinger to prevent Render spin-down
+    pinger = threading.Thread(target=_keep_alive_loop, daemon=True)
+    pinger.start()
+
     try:
         service = get_drive_service()
         file_list = list_drive_files(folder_id, service, recursive)
