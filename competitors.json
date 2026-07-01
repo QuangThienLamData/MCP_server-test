@@ -1,0 +1,20 @@
+[
+  {
+    "name": "ZaloPay",
+    "sources": [
+      {"url": "https://zalopay.vn/tin-tuc", "type": "blog"}
+    ]
+  },
+  {
+    "name": "ShopeePay",
+    "sources": [
+      {"url": ["https://shopeepay.vn/khuyen-mai", "https://shopeepay.vn/khuyen-mai-da-ket-thuc"], "type": "blog", "js": true}
+    ]
+  },
+  {
+    "name": "VNPay",
+    "sources": [
+      {"url": "https://vnpay.vn/tin-tuc", "type": "blog"}
+    ]
+  }
+]

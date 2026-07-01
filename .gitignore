@@ -12,3 +12,4 @@ wheels/
 # Environment variables
 .env
 chroma_db
+competitor_intel.db

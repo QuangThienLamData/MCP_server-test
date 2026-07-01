@@ -1,0 +1,47 @@
+{
+  "fintech": {
+    "queries": [
+      {"q": "ZaloPay OR VNPay OR \"MoMo wallet\" OR \"MoMo e-wallet\"", "lang": "en", "country": "vn"},
+      {"q": "\"e-wallet Vietnam\" OR \"digital wallet Vietnam\" OR \"mobile payment Vietnam\" OR \"Vietnam fintech\"", "lang": "en"},
+      {"q": "\"ví điện tử\" OR ZaloPay OR \"ví MoMo\" OR VNPay OR \"thanh toán không tiền mặt\"", "lang": "vi", "country": "vn"}
+    ],
+    "feeds": [
+      {"url": "https://vnexpress.net/rss/kinh-doanh.rss", "source": "VnExpress"},
+      {"url": "https://vnexpress.net/rss/so-hoa.rss", "source": "VnExpress"},
+      {"url": "https://cafef.vn/tai-chinh-ngan-hang.rss", "source": "CafeF"}
+    ],
+    "feed_filters": [
+      "ví điện tử", "zalopay", "momo", "vnpay", "thanh toán", "fintech",
+      "ngân hàng số", "ngân hàng điện tử", "chuyển đổi số", "qr", "ví trả"
+    ]
+  },
+  "ai_product": {
+    "queries": [
+      {"q": "\"AI product\" OR \"AI agent\" OR \"LLM application\"", "lang": "en"},
+      {"q": "\"AI in banking\" OR \"AI in fintech\" OR \"AI in payments\"", "lang": "en"},
+      {"q": "\"trí tuệ nhân tạo\" OR \"AI ngân hàng\" OR \"AI tài chính\"", "lang": "vi", "country": "vn"}
+    ]
+  },
+  "growth_marketing": {
+    "queries": [
+      {"q": "\"growth marketing\" OR \"user acquisition\" OR \"customer retention\"", "lang": "en"},
+      {"q": "\"mobile app marketing\" OR \"app engagement\" OR \"loyalty program\" OR \"referral program\"", "lang": "en"},
+      {"q": "\"tăng trưởng người dùng\" OR \"marketing ứng dụng\" OR \"chương trình khách hàng thân thiết\"", "lang": "vi", "country": "vn"}
+    ]
+  },
+  "regulatory": {
+    "queries": [
+      {"q": "\"fintech regulation Vietnam\" OR \"payment regulation Vietnam\" OR \"State Bank of Vietnam\"", "lang": "en", "country": "vn"},
+      {"q": "\"fintech regulation\" OR \"digital payment regulation\" OR \"MAS Singapore fintech\"", "lang": "en"},
+      {"q": "\"Ngân hàng Nhà nước\" OR \"quy định fintech\" OR \"quy định thanh toán số\"", "lang": "vi", "country": "vn"}
+    ],
+    "feeds": [
+      {"url": "https://vnexpress.net/rss/kinh-doanh.rss", "source": "VnExpress"},
+      {"url": "https://cafef.vn/tai-chinh-ngan-hang.rss", "source": "CafeF"}
+    ],
+    "feed_filters": [
+      "ngân hàng nhà nước", "nhnn", "trung gian thanh toán", "quy định thanh toán",
+      "quản lý ngoại hối", "chống rửa tiền", "tiền số", "tài sản số", "cấp phép ngân hàng"
+    ]
+  }
+}

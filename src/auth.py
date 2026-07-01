@@ -16,13 +16,14 @@ scalekit_client = ScalekitClient(
     settings.SCALEKIT_CLIENT_SECRET
 )
 
-BASE_URL = settings.SCALEKIT_RESOURCE_DOCS_URL.rsplit("/gnews/mcp", 1)[0]
+BASE_URL = settings.SCALEKIT_RESOURCE_DOCS_URL.rsplit("/research/mcp", 1)[0]
 
 
 class AuthMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
-        # Skip auth for well-known discovery endpoints
-        if request.url.path.startswith("/.well-known/"):
+        # Skip Scalekit for well-known discovery + the internal cron endpoint
+        # (the latter is guarded by its own X-Cron-Secret check in main.py).
+        if request.url.path.startswith("/.well-known/") or request.url.path.startswith("/internal/"):
             return await call_next(request)
 
         try:
@@ -53,12 +54,12 @@ class AuthMiddleware(BaseHTTPMiddleware):
 
         except HTTPException as e:
             # Determine which metadata URL to reference based on path
-            if request.url.path.startswith("/email"):
-                metadata_url = f"{BASE_URL}/.well-known/oauth-protected-resource/email/mcp"
-            elif request.url.path.startswith("/rag"):
-                metadata_url = f"{BASE_URL}/.well-known/oauth-protected-resource/rag/mcp"
+            if request.url.path.startswith("/ux"):
+                metadata_url = f"{BASE_URL}/.well-known/oauth-protected-resource/ux/mcp"
+            elif request.url.path.startswith("/youtube"):
+                metadata_url = f"{BASE_URL}/.well-known/oauth-protected-resource/youtube/mcp"
             else:
-                metadata_url = f"{BASE_URL}/.well-known/oauth-protected-resource/gnews/mcp"
+                metadata_url = f"{BASE_URL}/.well-known/oauth-protected-resource/research/mcp"
 
             return JSONResponse(
                 status_code=e.status_code,

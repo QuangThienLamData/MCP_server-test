@@ -1,0 +1,42 @@
+# Render Blueprint — cron jobs that trigger in-service crawls.
+#
+# The cron jobs do NOT crawl themselves; they POST /internal/crawl on the web service so the
+# crawl runs inside it (sharing its SQLite + the remote Pinecone index). This keeps dedup and
+# the SQLite-backed tools (digest/insights/compare/list) consistent.
+#
+# Schedules are UTC. Vietnam is UTC+7, so:  00:00 UTC = 07:00 VN,  12:00 UTC = 19:00 VN.
+#
+# Setup:
+#   1. Set CRON_SECRET (same value) on the WEB service and on BOTH cron jobs (Dashboard → Env).
+#   2. Set WEB_SERVICE_URL on the cron jobs to the web service's public URL.
+#   3. If you add this repo as a Blueprint, Render creates the cron jobs; otherwise replicate
+#      the two jobs in the Dashboard (New → Cron Job, same repo, Docker, the command + schedule).
+#
+# NOTE: the web service also needs CRON_SECRET set (to validate the header). SQLite is durable
+# only if the web service has a Persistent Disk with DB_PATH pointing at it (see CLAUDE.md);
+# otherwise crawl bookkeeping resets on redeploy/spin-down (Pinecone data is unaffected).
+
+services:
+  - type: cron
+    name: crawl-daily            # 07:00 VN — rag + news + reviews
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    schedule: "0 0 * * *"
+    dockerCommand: uv run python cron_trigger.py all
+    envVars:
+      - key: WEB_SERVICE_URL
+        value: https://mcp-server-test-2soh.onrender.com
+      - key: CRON_SECRET
+        sync: false
+
+  - type: cron
+    name: crawl-news-pm          # 19:00 VN — news (2nd run of the day)
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    schedule: "0 12 * * *"
+    dockerCommand: uv run python cron_trigger.py news
+    envVars:
+      - key: WEB_SERVICE_URL
+        value: https://mcp-server-test-2soh.onrender.com
+      - key: CRON_SECRET
+        sync: false

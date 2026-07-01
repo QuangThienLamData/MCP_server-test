@@ -1,8 +1,10 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from gnews_mcp_server import mcp as gnews_mcp_server
-from email_mcp import mcp as email_mcp_server
-from rag_mcp import mcp as rag_mcp_server, auto_ingest_on_startup
+from fastapi.responses import JSONResponse
+import research_mcp
+from research_mcp import mcp as research_mcp_server, init_on_startup
+from refero_mcp import mcp as refero_mcp_server
+from youtube_mcp import mcp as youtube_mcp_server
 import contextlib
 import os
 import uvicorn
@@ -10,29 +12,29 @@ import uvicorn
 from src.auth import AuthMiddleware
 from src.config import settings
 
-BASE_URL = settings.SCALEKIT_RESOURCE_DOCS_URL.rsplit("/gnews/mcp", 1)[0]
+BASE_URL = settings.SCALEKIT_RESOURCE_DOCS_URL.rsplit("/research/mcp", 1)[0]
 
-GNEWS_METADATA = {
-    "resource": f"{BASE_URL}/gnews/mcp",
+RESEARCH_METADATA = {
+    "resource": f"{BASE_URL}/research/mcp",
     "authorization_servers": [settings.SCALEKIT_AUTHORIZATION_SERVERS],
     "bearer_methods_supported": ["header"],
-    "resource_documentation": f"{BASE_URL}/gnews/mcp/docs",
+    "resource_documentation": f"{BASE_URL}/research/mcp/docs",
     "scopes_supported": ["search:read"],
 }
 
-EMAIL_METADATA = {
-    "resource": f"{BASE_URL}/email/mcp",
+UX_METADATA = {
+    "resource": f"{BASE_URL}/ux/mcp",
     "authorization_servers": [settings.SCALEKIT_AUTHORIZATION_SERVERS],
     "bearer_methods_supported": ["header"],
-    "resource_documentation": f"{BASE_URL}/email/mcp/docs",
+    "resource_documentation": f"{BASE_URL}/ux/mcp/docs",
     "scopes_supported": ["search:read"],
 }
 
-RAG_METADATA = {
-    "resource": f"{BASE_URL}/rag/mcp",
+YOUTUBE_METADATA = {
+    "resource": f"{BASE_URL}/youtube/mcp",
     "authorization_servers": [settings.SCALEKIT_AUTHORIZATION_SERVERS],
     "bearer_methods_supported": ["header"],
-    "resource_documentation": f"{BASE_URL}/rag/mcp/docs",
+    "resource_documentation": f"{BASE_URL}/youtube/mcp/docs",
     "scopes_supported": ["search:read"],
 }
 
@@ -40,11 +42,11 @@ RAG_METADATA = {
 @contextlib.asynccontextmanager
 async def lifespan(app: FastAPI):
     async with contextlib.AsyncExitStack() as stack:
-        await stack.enter_async_context(gnews_mcp_server.session_manager.run())
-        await stack.enter_async_context(email_mcp_server.session_manager.run())
-        await stack.enter_async_context(rag_mcp_server.session_manager.run())
+        await stack.enter_async_context(research_mcp_server.session_manager.run())
+        await stack.enter_async_context(refero_mcp_server.session_manager.run())
+        await stack.enter_async_context(youtube_mcp_server.session_manager.run())
         print("Starting up MCP Servers...")
-        auto_ingest_on_startup()
+        init_on_startup()
         yield
         print("Shutting down MCP Servers...")
 
@@ -58,27 +60,53 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-
-@app.get("/.well-known/oauth-protected-resource/gnews/mcp")
-async def gnews_oauth_metadata():
-    return GNEWS_METADATA
-
-
-@app.get("/.well-known/oauth-protected-resource/email/mcp")
-async def email_oauth_metadata():
-    return EMAIL_METADATA
+@app.get("/.well-known/oauth-protected-resource/research/mcp")
+async def research_oauth_metadata():
+    return RESEARCH_METADATA
 
 
-@app.get("/.well-known/oauth-protected-resource/rag/mcp")
-async def rag_oauth_metadata():
-    return RAG_METADATA
+@app.get("/.well-known/oauth-protected-resource/ux/mcp")
+async def ux_oauth_metadata():
+    return UX_METADATA
+
+
+@app.get("/.well-known/oauth-protected-resource/youtube/mcp")
+async def youtube_oauth_metadata():
+    return YOUTUBE_METADATA
+
+
+CRON_SECRET = os.getenv("CRON_SECRET", "")
+
+
+@app.post("/internal/crawl")
+async def internal_crawl(request: Request):
+    """Trigger in-service crawls (competitors/news/reviews). Guarded by the X-Cron-Secret
+    header, NOT Scalekit — meant to be called by a Render Cron Job."""
+    if not CRON_SECRET or request.headers.get("X-Cron-Secret") != CRON_SECRET:
+        return JSONResponse(status_code=401, content={"error": "unauthorized"})
+    target = request.query_params.get("target", "all")
+    try:
+        last_days = int(request.query_params.get("last_days", "3"))
+    except ValueError:
+        last_days = 3
+
+    out = {}
+    if target in ("rag", "competitors", "all"):
+        out["competitors"] = research_mcp.crawl_competitors()
+    if target in ("news", "all"):
+        out["news"] = research_mcp.crawl_news()
+    if target in ("reviews", "all"):
+        out["reviews"] = research_mcp.crawl_reviews(last_days=last_days)
+    if not out:
+        return JSONResponse(status_code=400, content={"error": f"unknown target '{target}'"})
+    return {"triggered": target, "results": out}
 
 
 app.add_middleware(AuthMiddleware)
 
-app.mount("/gnews", gnews_mcp_server.streamable_http_app(), name="GNews MCP Server")
-app.mount("/email", email_mcp_server.streamable_http_app(), name="Email MCP Server")
-app.mount("/rag", rag_mcp_server.streamable_http_app(), name="RAG MCP Server")
+app.mount("/research", research_mcp_server.streamable_http_app(), name="Research MCP Server")
+app.mount("/ux", refero_mcp_server.streamable_http_app(), name="Refero UX MCP Server")
+app.mount("/youtube", youtube_mcp_server.streamable_http_app(), name="YouTube MCP Server")
 
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 10000))

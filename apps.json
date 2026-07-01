@@ -1,0 +1,6 @@
+{
+  "MoMo": {"android": "com.mservice.momotransfer", "ios": "918751511"},
+  "ZaloPay": {"android": "vn.com.vng.zalopay", "ios": "1112407590"},
+  "VNPay": {"android": "vnpay.smartacccount", "ios": "1470378562"},
+  "ShopeePay": {"android": "com.beeasy.toppay", "ios": "1032301823"}
+}
