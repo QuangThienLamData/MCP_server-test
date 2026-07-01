@@ -1,5 +1,5 @@
 """Unified Research MCP Server — combines Competitor Intelligence, Industry News,
-and App Reviews into a single MCP endpoint."""
+App Reviews, UX Patterns, and YouTube Intelligence into a single MCP endpoint."""
 
 import sqlite3
 import threading
@@ -34,6 +34,18 @@ from reviews_mcp import (
     _review_crawl_status, _init_reviews_db,
     _crawl_reviews_background,
     _review_insights_llm, _dist_str,
+)
+
+# UX (Refero) tools — imported and re-registered below
+from refero_mcp import (
+    search_ux_patterns, search_user_flows, search_design_styles,
+    get_ux_screen, get_ux_flow,
+)
+
+# YouTube tools — imported and re-registered below
+from youtube_mcp import (
+    search_video_content, crawl_youtube_topic, get_video_transcript,
+    list_indexed_videos, get_youtube_status,
 )
 
 load_dotenv()
@@ -691,6 +703,15 @@ def get_research_status() -> str:
 
     conn.close()
     return "\n".join(lines)
+
+
+# ═══════════════════ UX + YouTube (re-register from their modules) ═══════════════════
+
+for _fn in [
+    search_ux_patterns, search_user_flows, search_design_styles, get_ux_screen, get_ux_flow,
+    search_video_content, crawl_youtube_topic, get_video_transcript, list_indexed_videos, get_youtube_status,
+]:
+    mcp.tool()(_fn)
 
 
 # ═══════════════════ Startup ═══════════════════

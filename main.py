@@ -3,8 +3,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 import research_mcp
 from research_mcp import mcp as research_mcp_server, init_on_startup
-from refero_mcp import mcp as refero_mcp_server
-from youtube_mcp import mcp as youtube_mcp_server
 import contextlib
 import os
 import uvicorn
@@ -22,33 +20,15 @@ RESEARCH_METADATA = {
     "scopes_supported": ["search:read"],
 }
 
-UX_METADATA = {
-    "resource": f"{BASE_URL}/ux/mcp",
-    "authorization_servers": [settings.SCALEKIT_AUTHORIZATION_SERVERS],
-    "bearer_methods_supported": ["header"],
-    "resource_documentation": f"{BASE_URL}/ux/mcp/docs",
-    "scopes_supported": ["search:read"],
-}
-
-YOUTUBE_METADATA = {
-    "resource": f"{BASE_URL}/youtube/mcp",
-    "authorization_servers": [settings.SCALEKIT_AUTHORIZATION_SERVERS],
-    "bearer_methods_supported": ["header"],
-    "resource_documentation": f"{BASE_URL}/youtube/mcp/docs",
-    "scopes_supported": ["search:read"],
-}
-
 
 @contextlib.asynccontextmanager
 async def lifespan(app: FastAPI):
     async with contextlib.AsyncExitStack() as stack:
         await stack.enter_async_context(research_mcp_server.session_manager.run())
-        await stack.enter_async_context(refero_mcp_server.session_manager.run())
-        await stack.enter_async_context(youtube_mcp_server.session_manager.run())
-        print("Starting up MCP Servers...")
+        print("Starting up MCP Server...")
         init_on_startup()
         yield
-        print("Shutting down MCP Servers...")
+        print("Shutting down MCP Server...")
 
 app = FastAPI(title="MCP Server", version="1.0.0", lifespan=lifespan)
 
@@ -60,19 +40,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
 @app.get("/.well-known/oauth-protected-resource/research/mcp")
 async def research_oauth_metadata():
     return RESEARCH_METADATA
-
-
-@app.get("/.well-known/oauth-protected-resource/ux/mcp")
-async def ux_oauth_metadata():
-    return UX_METADATA
-
-
-@app.get("/.well-known/oauth-protected-resource/youtube/mcp")
-async def youtube_oauth_metadata():
-    return YOUTUBE_METADATA
 
 
 CRON_SECRET = os.getenv("CRON_SECRET", "")
@@ -105,8 +76,6 @@ async def internal_crawl(request: Request):
 app.add_middleware(AuthMiddleware)
 
 app.mount("/research", research_mcp_server.streamable_http_app(), name="Research MCP Server")
-app.mount("/ux", refero_mcp_server.streamable_http_app(), name="Refero UX MCP Server")
-app.mount("/youtube", youtube_mcp_server.streamable_http_app(), name="YouTube MCP Server")
 
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 10000))

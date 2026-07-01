@@ -54,12 +54,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
 
         except HTTPException as e:
             # Determine which metadata URL to reference based on path
-            if request.url.path.startswith("/ux"):
-                metadata_url = f"{BASE_URL}/.well-known/oauth-protected-resource/ux/mcp"
-            elif request.url.path.startswith("/youtube"):
-                metadata_url = f"{BASE_URL}/.well-known/oauth-protected-resource/youtube/mcp"
-            else:
-                metadata_url = f"{BASE_URL}/.well-known/oauth-protected-resource/research/mcp"
+            metadata_url = f"{BASE_URL}/.well-known/oauth-protected-resource/research/mcp"
 
             return JSONResponse(
                 status_code=e.status_code,
