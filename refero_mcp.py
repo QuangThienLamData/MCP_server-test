@@ -1,5 +1,7 @@
 import logging
 import os
+import re
+from urllib.parse import quote
 
 import httpx
 from dotenv import load_dotenv
@@ -16,8 +18,21 @@ logger = logging.getLogger(__name__)
 
 REFERO_MCP_URL = os.getenv("REFERO_MCP_URL", "https://api.refero.design/mcp")
 REFERO_TOKEN = os.getenv("REFERO_TOKEN", "")
+SELF_BASE_URL = os.getenv("RENDER_EXTERNAL_URL", "").rstrip("/")
 _refero_session_id: str | None = None
 _refero_req_id = 0
+
+_IMAGE_URL_RE = re.compile(r'https://images\.refero\.design/[^\s\)\]"\']+')
+
+
+def _rewrite_image_urls(text: str) -> str:
+    """Replace images.refero.design URLs with our proxy to bypass CORS."""
+    if not SELF_BASE_URL:
+        return text
+    return _IMAGE_URL_RE.sub(
+        lambda m: f"{SELF_BASE_URL}/proxy/image?url={quote(m.group(0), safe='')}",
+        text,
+    )
 
 mcp = FastMCP(
     name="Refero UX MCP Server",
@@ -101,7 +116,7 @@ async def _refero_call(tool_name: str, args: dict) -> str:
                 "https://refero.design/mcp/upgrade, then retry.")
     if result.get("isError"):
         return f"Refero error: {text or '(unknown)'}"
-    return text or "(no results)"
+    return _rewrite_image_urls(text) if text else "(no results)"
 
 
 # --- MCP Tools (thin proxies over Refero) ---

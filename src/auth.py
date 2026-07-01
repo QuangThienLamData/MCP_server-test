@@ -23,7 +23,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         # Skip Scalekit for well-known discovery + the internal cron endpoint
         # (the latter is guarded by its own X-Cron-Secret check in main.py).
-        if request.url.path.startswith("/.well-known/") or request.url.path.startswith("/internal/"):
+        if request.url.path.startswith("/.well-known/") or request.url.path.startswith("/internal/") or request.url.path.startswith("/proxy/"):
             return await call_next(request)
 
         try:

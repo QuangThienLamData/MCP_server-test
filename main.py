@@ -1,11 +1,13 @@
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
+import httpx
 import research_mcp
 from research_mcp import mcp as research_mcp_server, init_on_startup
 import contextlib
 import os
 import uvicorn
+from urllib.parse import urlparse
 
 from src.auth import AuthMiddleware
 from src.config import settings
@@ -44,6 +46,31 @@ app.add_middleware(
 @app.get("/.well-known/oauth-protected-resource/research/mcp")
 async def research_oauth_metadata():
     return RESEARCH_METADATA
+
+
+ALLOWED_IMAGE_HOSTS = {"images.refero.design", "refero.design"}
+
+
+@app.get("/proxy/image")
+async def proxy_image(url: str = ""):
+    """Fetch an image from an allowed host and re-serve it, bypassing CORS."""
+    if not url:
+        return JSONResponse(status_code=400, content={"error": "url parameter required"})
+    host = urlparse(url).hostname or ""
+    if host not in ALLOWED_IMAGE_HOSTS:
+        return JSONResponse(status_code=403, content={"error": f"host '{host}' not allowed"})
+    try:
+        async with httpx.AsyncClient(timeout=15, follow_redirects=True) as c:
+            r = await c.get(url)
+            r.raise_for_status()
+        ct = r.headers.get("content-type", "image/png")
+        return Response(
+            content=r.content, media_type=ct,
+            headers={"Cache-Control": "public, max-age=86400",
+                     "Access-Control-Allow-Origin": "*"},
+        )
+    except Exception as e:
+        return JSONResponse(status_code=502, content={"error": str(e)})
 
 
 CRON_SECRET = os.getenv("CRON_SECRET", "")
