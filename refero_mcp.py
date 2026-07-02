@@ -1,7 +1,8 @@
+import asyncio
+import base64
 import logging
 import os
 import re
-from urllib.parse import quote
 
 import httpx
 from dotenv import load_dotenv
@@ -18,21 +19,37 @@ logger = logging.getLogger(__name__)
 
 REFERO_MCP_URL = os.getenv("REFERO_MCP_URL", "https://api.refero.design/mcp")
 REFERO_TOKEN = os.getenv("REFERO_TOKEN", "")
-SELF_BASE_URL = os.getenv("RENDER_EXTERNAL_URL", "").rstrip("/")
 _refero_session_id: str | None = None
 _refero_req_id = 0
 
 _IMAGE_URL_RE = re.compile(r'https://images\.refero\.design/[^\s\)\]"\']+')
+_MAX_INLINE_IMAGES = 8
 
 
-def _rewrite_image_urls(text: str) -> str:
-    """Replace images.refero.design URLs with our proxy to bypass CORS."""
-    if not SELF_BASE_URL:
+async def _fetch_as_data_uri(client: httpx.AsyncClient, url: str) -> tuple[str, str]:
+    """Fetch an image and return (original_url, data_uri). On failure returns original URL."""
+    try:
+        r = await client.get(url)
+        r.raise_for_status()
+        ct = r.headers.get("content-type", "image/png").split(";")[0].strip()
+        b64 = base64.b64encode(r.content).decode("ascii")
+        return url, f"data:{ct};base64,{b64}"
+    except Exception:
+        return url, url
+
+
+async def _inline_images(text: str) -> str:
+    """Replace images.refero.design URLs with base64 data URIs to bypass CSP."""
+    urls = list(dict.fromkeys(_IMAGE_URL_RE.findall(text)))  # unique, preserve order
+    if not urls:
         return text
-    return _IMAGE_URL_RE.sub(
-        lambda m: f"{SELF_BASE_URL}/proxy/image?url={quote(m.group(0), safe='')}",
-        text,
-    )
+    urls = urls[:_MAX_INLINE_IMAGES]
+    async with httpx.AsyncClient(timeout=15, follow_redirects=True) as c:
+        results = await asyncio.gather(*[_fetch_as_data_uri(c, u) for u in urls])
+    for orig, replacement in results:
+        if replacement != orig:
+            text = text.replace(orig, replacement)
+    return text
 
 mcp = FastMCP(
     name="Refero UX MCP Server",
@@ -116,7 +133,7 @@ async def _refero_call(tool_name: str, args: dict) -> str:
                 "https://refero.design/mcp/upgrade, then retry.")
     if result.get("isError"):
         return f"Refero error: {text or '(unknown)'}"
-    return _rewrite_image_urls(text) if text else "(no results)"
+    return (await _inline_images(text)) if text else "(no results)"
 
 
 # --- MCP Tools (thin proxies over Refero) ---
