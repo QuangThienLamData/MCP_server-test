@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import os
 
@@ -30,13 +31,18 @@ def _platform(p: str) -> str:
     return p if p in ("ios", "web") else "web"
 
 
-def _english_query(q: str) -> str:
-    """Refero search is English; translate Vietnamese queries to English for better hits."""
+async def _english_query(q: str) -> str:
+    """Refero search is English; translate Vietnamese queries to English for better hits.
+    Runs the sync OpenAI call in a thread to avoid blocking the event loop."""
     if _detect_lang(q) == "en":
         return q
-    for v in _bilingual_queries(q):
-        if _detect_lang(v) == "en":
-            return v
+    try:
+        variants = await asyncio.to_thread(_bilingual_queries, q)
+        for v in variants:
+            if _detect_lang(v) == "en":
+                return v
+    except Exception as e:
+        logger.warning(f"[refero] query translation failed: {e}")
     return q
 
 
@@ -46,6 +52,8 @@ async def _refero_call(tool_name: str, args: dict) -> str:
     if not REFERO_TOKEN:
         return "Error: REFERO_TOKEN not set."
     global _refero_session_id, _refero_req_id
+
+    logger.info(f"[refero] START {tool_name} args={args}")
 
     headers = {
         "Authorization": f"Bearer {REFERO_TOKEN}",
@@ -57,8 +65,9 @@ async def _refero_call(tool_name: str, args: dict) -> str:
 
     try:
         async with httpx.AsyncClient(timeout=60) as c:
-            # Lazy init: send initialize + notification on first call
+            # Lazy init: send initialize on first call
             if not _refero_session_id:
+                logger.info("[refero] initializing session...")
                 _refero_req_id += 1
                 init_resp = await c.post(REFERO_MCP_URL, json={
                     "jsonrpc": "2.0", "id": _refero_req_id, "method": "initialize",
@@ -70,16 +79,16 @@ async def _refero_call(tool_name: str, args: dict) -> str:
                 if sid:
                     _refero_session_id = sid
                     headers["Mcp-Session-Id"] = sid
-                # notifications/initialized is fire-and-forget per MCP spec.
-                # Refero responds with an SSE stream that never closes, which
-                # poisons httpx's connection pool. Skip it — Refero works without.
+                logger.info(f"[refero] session initialized, id={_refero_session_id}")
 
             # Call the tool
             _refero_req_id += 1
+            logger.info(f"[refero] calling tool {tool_name}...")
             resp = await c.post(REFERO_MCP_URL, json={
                 "jsonrpc": "2.0", "id": _refero_req_id, "method": "tools/call",
                 "params": {"name": tool_name, "arguments": args},
             }, headers=headers)
+            logger.info(f"[refero] got response status={resp.status_code}")
             resp.raise_for_status()
             data = resp.json()
     except Exception as e:
@@ -117,8 +126,9 @@ async def search_ux_patterns(query: str, platform: str = "web", page: int = 1) -
         platform: 'web' or 'ios' (only these two are supported; default 'web')
         page: Result page (default 1)
     """
+    eq = await _english_query(query)
     return await _refero_call("refero_search_screens",
-                              {"query": _english_query(query), "platform": _platform(platform), "page": page})
+                              {"query": eq, "platform": _platform(platform), "page": page})
 
 
 @mcp.tool()
@@ -133,8 +143,9 @@ async def search_user_flows(query: str, platform: str = "web", page: int = 1) ->
         platform: 'web' or 'ios' (default 'web')
         page: Result page (default 1)
     """
+    eq = await _english_query(query)
     return await _refero_call("refero_search_flows",
-                              {"query": _english_query(query), "platform": _platform(platform), "page": page})
+                              {"query": eq, "platform": _platform(platform), "page": page})
 
 
 @mcp.tool()
@@ -147,7 +158,8 @@ async def search_design_styles(query: str, page: int = 1) -> str:
         query: Style to look for, e.g. "dark fintech dashboard"
         page: Result page (default 1)
     """
-    return await _refero_call("refero_search_styles", {"query": _english_query(query), "page": page})
+    eq = await _english_query(query)
+    return await _refero_call("refero_search_styles", {"query": eq, "page": page})
 
 
 @mcp.tool()
