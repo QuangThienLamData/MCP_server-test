@@ -163,7 +163,7 @@ async def _refero_call(tool_name: str, args: dict, *, inline_images: bool = Fals
 
 # --- MCP Tools (thin proxies over Refero) ---
 @mcp.tool()
-async def search_ux_patterns(query: str, platform: str = "web", page: int = 1) -> str:
+async def search_ux_patterns(query: str, platform: str = "web", page: int = 1):
     """
     Find UI/UX screen patterns from real shipped apps via Refero (135k+ screens).
     Returns up to 3 actual screenshots as inline images. ALWAYS answer in Vietnamese or English.
@@ -180,7 +180,7 @@ async def search_ux_patterns(query: str, platform: str = "web", page: int = 1) -
 
 
 @mcp.tool()
-async def search_user_flows(query: str, platform: str = "web", page: int = 1) -> str:
+async def search_user_flows(query: str, platform: str = "web", page: int = 1):
     """
     Search user flows (sequences of connected screens) from real apps via Refero.
     Returns flow metadata WITHOUT inline screenshots (flows have many screens).
@@ -200,7 +200,7 @@ async def search_user_flows(query: str, platform: str = "web", page: int = 1) ->
 
 
 @mcp.tool()
-async def search_design_styles(query: str, page: int = 1) -> str:
+async def search_design_styles(query: str, page: int = 1):
     """
     Search Refero's curated design styles (visual/style references) by meaning.
     Returns up to 3 actual screenshots as inline images. ALWAYS answer in Vietnamese or English.
@@ -215,7 +215,7 @@ async def search_design_styles(query: str, page: int = 1) -> str:
 
 
 @mcp.tool()
-async def get_ux_screen(screen_id: str) -> str:
+async def get_ux_screen(screen_id: str):
     """
     Get full details of a Refero screen by its UUID (from a search result).
     Returns the actual screenshot as an inline image. ALWAYS answer in Vietnamese or English.
@@ -228,7 +228,7 @@ async def get_ux_screen(screen_id: str) -> str:
 
 
 @mcp.tool()
-async def get_ux_flow(flow_id: int) -> str:
+async def get_ux_flow(flow_id: int):
     """
     Get full details of a Refero user flow by its numeric id (from a search result).
     Returns flow metadata WITHOUT inline screenshots (flows have many screens).
