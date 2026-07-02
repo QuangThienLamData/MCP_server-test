@@ -9,18 +9,19 @@ import os
 import uvicorn
 from urllib.parse import urlparse
 
-from src.auth import AuthMiddleware
-from src.config import settings
-
-BASE_URL = settings.SCALEKIT_RESOURCE_DOCS_URL.rsplit("/research/mcp", 1)[0]
-
-RESEARCH_METADATA = {
-    "resource": f"{BASE_URL}/research/mcp",
-    "authorization_servers": [settings.SCALEKIT_AUTHORIZATION_SERVERS],
-    "bearer_methods_supported": ["header"],
-    "resource_documentation": f"{BASE_URL}/research/mcp/docs",
-    "scopes_supported": ["search:read"],
-}
+# AUTH TEMPORARILY DISABLED — uncomment to re-enable
+# from src.auth import AuthMiddleware
+# from src.config import settings
+#
+# BASE_URL = settings.SCALEKIT_RESOURCE_DOCS_URL.rsplit("/research/mcp", 1)[0]
+#
+# RESEARCH_METADATA = {
+#     "resource": f"{BASE_URL}/research/mcp",
+#     "authorization_servers": [settings.SCALEKIT_AUTHORIZATION_SERVERS],
+#     "bearer_methods_supported": ["header"],
+#     "resource_documentation": f"{BASE_URL}/research/mcp/docs",
+#     "scopes_supported": ["search:read"],
+# }
 
 
 @contextlib.asynccontextmanager
@@ -43,9 +44,9 @@ app.add_middleware(
 )
 
 
-@app.get("/.well-known/oauth-protected-resource/research/mcp")
-async def research_oauth_metadata():
-    return RESEARCH_METADATA
+# @app.get("/.well-known/oauth-protected-resource/research/mcp")
+# async def research_oauth_metadata():
+#     return RESEARCH_METADATA
 
 
 ALLOWED_IMAGE_HOSTS = {"images.refero.design", "refero.design"}
@@ -100,7 +101,7 @@ async def internal_crawl(request: Request):
     return {"triggered": target, "results": out}
 
 
-app.add_middleware(AuthMiddleware)
+# app.add_middleware(AuthMiddleware)
 
 app.mount("/research", research_mcp_server.streamable_http_app(), name="Research MCP Server")
 
