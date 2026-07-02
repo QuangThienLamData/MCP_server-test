@@ -1,8 +1,5 @@
-import asyncio
-import base64
 import logging
 import os
-import re
 
 import httpx
 from dotenv import load_dotenv
@@ -21,35 +18,6 @@ REFERO_MCP_URL = os.getenv("REFERO_MCP_URL", "https://api.refero.design/mcp")
 REFERO_TOKEN = os.getenv("REFERO_TOKEN", "")
 _refero_session_id: str | None = None
 _refero_req_id = 0
-
-_IMAGE_URL_RE = re.compile(r'https://images\.refero\.design/[^\s\)\]"\']+')
-_MAX_INLINE_IMAGES = 8
-
-
-async def _fetch_as_data_uri(client: httpx.AsyncClient, url: str) -> tuple[str, str]:
-    """Fetch an image and return (original_url, data_uri). On failure returns original URL."""
-    try:
-        r = await client.get(url)
-        r.raise_for_status()
-        ct = r.headers.get("content-type", "image/png").split(";")[0].strip()
-        b64 = base64.b64encode(r.content).decode("ascii")
-        return url, f"data:{ct};base64,{b64}"
-    except Exception:
-        return url, url
-
-
-async def _inline_images(text: str) -> str:
-    """Replace images.refero.design URLs with base64 data URIs to bypass CSP."""
-    urls = list(dict.fromkeys(_IMAGE_URL_RE.findall(text)))  # unique, preserve order
-    if not urls:
-        return text
-    urls = urls[:_MAX_INLINE_IMAGES]
-    async with httpx.AsyncClient(timeout=15, follow_redirects=True) as c:
-        results = await asyncio.gather(*[_fetch_as_data_uri(c, u) for u in urls])
-    for orig, replacement in results:
-        if replacement != orig:
-            text = text.replace(orig, replacement)
-    return text
 
 mcp = FastMCP(
     name="Refero UX MCP Server",
@@ -133,7 +101,7 @@ async def _refero_call(tool_name: str, args: dict) -> str:
                 "https://refero.design/mcp/upgrade, then retry.")
     if result.get("isError"):
         return f"Refero error: {text or '(unknown)'}"
-    return (await _inline_images(text)) if text else "(no results)"
+    return text or "(no results)"
 
 
 # --- MCP Tools (thin proxies over Refero) ---
