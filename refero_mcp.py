@@ -1,4 +1,3 @@
-import asyncio
 import logging
 import os
 
@@ -71,15 +70,9 @@ async def _refero_call(tool_name: str, args: dict) -> str:
                 if sid:
                     _refero_session_id = sid
                     headers["Mcp-Session-Id"] = sid
-                try:
-                    await asyncio.wait_for(
-                        c.post(REFERO_MCP_URL, json={
-                            "jsonrpc": "2.0", "method": "notifications/initialized",
-                        }, headers=headers),
-                        timeout=3.0,
-                    )
-                except asyncio.TimeoutError:
-                    pass
+                # notifications/initialized is fire-and-forget per MCP spec.
+                # Refero responds with an SSE stream that never closes, which
+                # poisons httpx's connection pool. Skip it — Refero works without.
 
             # Call the tool
             _refero_req_id += 1
