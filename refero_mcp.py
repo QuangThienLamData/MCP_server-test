@@ -1,5 +1,4 @@
 import asyncio
-import base64
 import logging
 import os
 import re
@@ -7,6 +6,7 @@ import re
 import httpx
 from dotenv import load_dotenv
 from mcp.server.fastmcp import FastMCP
+from mcp.server.fastmcp.utilities.types import Image
 from mcp.server.transport_security import TransportSecuritySettings
 
 # Reuse the shared cross-lingual helpers (Refero is an English design DB, so Vietnamese
@@ -24,35 +24,39 @@ _refero_req_id = 0
 
 _IMAGE_URL_RE = re.compile(r'https://images\.refero\.design/[^\s\)\]"\']+')
 _MAX_INLINE = 3
-_MAX_IMG_BYTES = 200_000  # skip images >200KB raw (~270KB base64)
+_MAX_IMG_BYTES = 200_000  # skip images >200KB raw
 
 
-async def _fetch_data_uri(client: httpx.AsyncClient, url: str) -> tuple[str, str | None]:
-    """Fetch one image → (url, data_uri) or (url, None) on failure/oversize."""
+async def _fetch_image(client: httpx.AsyncClient, url: str) -> Image | None:
+    """Fetch one image → Image object or None on failure/oversize."""
     try:
         r = await client.get(url)
         r.raise_for_status()
         if len(r.content) > _MAX_IMG_BYTES:
-            return url, None
+            return None
         ct = r.headers.get("content-type", "image/png").split(";")[0].strip()
-        b64 = base64.b64encode(r.content).decode("ascii")
-        return url, f"data:{ct};base64,{b64}"
+        fmt = ct.split("/")[-1]  # "jpeg", "png", etc.
+        return Image(data=r.content, format=fmt)
     except Exception:
-        return url, None
+        return None
 
 
-async def _inline_images(text: str, max_images: int = _MAX_INLINE) -> str:
-    """Replace first N image URLs with base64 data URIs. Remaining URLs kept as links."""
+async def _with_image_blocks(text: str, max_images: int = _MAX_INLINE) -> list:
+    """Return [cleaned_text, Image, Image, ...] — proper MCP ImageContent blocks.
+    Strips inlined URLs from text so they don't appear twice."""
     urls = list(dict.fromkeys(_IMAGE_URL_RE.findall(text)))
     if not urls:
-        return text
-    to_inline = urls[:max_images]
+        return [text]
+    to_fetch = urls[:max_images]
     async with httpx.AsyncClient(timeout=15, follow_redirects=True) as c:
-        results = await asyncio.gather(*[_fetch_data_uri(c, u) for u in to_inline])
-    for orig, data_uri in results:
-        if data_uri:
-            text = text.replace(orig, data_uri)
-    return text
+        results = await asyncio.gather(*[_fetch_image(c, u) for u in to_fetch])
+    # Strip fetched URLs from text (successfully fetched ones become image blocks)
+    for url, img in zip(to_fetch, results):
+        if img is not None:
+            text = text.replace(url, "[see image below]")
+    parts: list = [text]
+    parts.extend(img for img in results if img is not None)
+    return parts
 
 
 def _strip_images(text: str) -> str:
@@ -85,9 +89,9 @@ async def _english_query(q: str) -> str:
     return q
 
 
-async def _refero_call(tool_name: str, args: dict, *, inline_images: bool = False) -> str:
+async def _refero_call(tool_name: str, args: dict, *, inline_images: bool = False) -> str | list:
     """Call a Refero MCP tool via direct JSON-RPC over HTTP.
-    inline_images=True → base64-inline up to 3 images (for single/few screens).
+    inline_images=True → return [text, Image, Image, ...] as proper MCP content blocks.
     inline_images=False → strip image URLs (for flows with many screens)."""
     if not REFERO_TOKEN:
         return "Error: REFERO_TOKEN not set."
@@ -153,7 +157,7 @@ async def _refero_call(tool_name: str, args: dict, *, inline_images: bool = Fals
     if not text:
         return "(no results)"
     if inline_images:
-        return await _inline_images(text)
+        return await _with_image_blocks(text)
     return _strip_images(text)
 
 
