@@ -1,6 +1,8 @@
 import asyncio
+import base64
 import logging
 import os
+import re
 
 import httpx
 from dotenv import load_dotenv
@@ -19,6 +21,43 @@ REFERO_MCP_URL = os.getenv("REFERO_MCP_URL", "https://api.refero.design/mcp")
 REFERO_TOKEN = os.getenv("REFERO_TOKEN", "")
 _refero_session_id: str | None = None
 _refero_req_id = 0
+
+_IMAGE_URL_RE = re.compile(r'https://images\.refero\.design/[^\s\)\]"\']+')
+_MAX_INLINE = 3
+_MAX_IMG_BYTES = 200_000  # skip images >200KB raw (~270KB base64)
+
+
+async def _fetch_data_uri(client: httpx.AsyncClient, url: str) -> tuple[str, str | None]:
+    """Fetch one image → (url, data_uri) or (url, None) on failure/oversize."""
+    try:
+        r = await client.get(url)
+        r.raise_for_status()
+        if len(r.content) > _MAX_IMG_BYTES:
+            return url, None
+        ct = r.headers.get("content-type", "image/png").split(";")[0].strip()
+        b64 = base64.b64encode(r.content).decode("ascii")
+        return url, f"data:{ct};base64,{b64}"
+    except Exception:
+        return url, None
+
+
+async def _inline_images(text: str, max_images: int = _MAX_INLINE) -> str:
+    """Replace first N image URLs with base64 data URIs. Remaining URLs kept as links."""
+    urls = list(dict.fromkeys(_IMAGE_URL_RE.findall(text)))
+    if not urls:
+        return text
+    to_inline = urls[:max_images]
+    async with httpx.AsyncClient(timeout=15, follow_redirects=True) as c:
+        results = await asyncio.gather(*[_fetch_data_uri(c, u) for u in to_inline])
+    for orig, data_uri in results:
+        if data_uri:
+            text = text.replace(orig, data_uri)
+    return text
+
+
+def _strip_images(text: str) -> str:
+    """Remove image URLs from text — used for flow responses where we want anatomy only."""
+    return _IMAGE_URL_RE.sub("[image — open link in browser to view]", text)
 
 mcp = FastMCP(
     name="Refero UX MCP Server",
@@ -46,9 +85,10 @@ async def _english_query(q: str) -> str:
     return q
 
 
-async def _refero_call(tool_name: str, args: dict) -> str:
-    """Call a Refero MCP tool via direct JSON-RPC over HTTP (avoids SDK streamablehttp_client
-    hanging on Windows). Lazy-initialises the session on first call."""
+async def _refero_call(tool_name: str, args: dict, *, inline_images: bool = False) -> str:
+    """Call a Refero MCP tool via direct JSON-RPC over HTTP.
+    inline_images=True → base64-inline up to 3 images (for single/few screens).
+    inline_images=False → strip image URLs (for flows with many screens)."""
     if not REFERO_TOKEN:
         return "Error: REFERO_TOKEN not set."
     global _refero_session_id, _refero_req_id
@@ -110,7 +150,11 @@ async def _refero_call(tool_name: str, args: dict) -> str:
                 "https://refero.design/mcp/upgrade, then retry.")
     if result.get("isError"):
         return f"Refero error: {text or '(unknown)'}"
-    return text or "(no results)"
+    if not text:
+        return "(no results)"
+    if inline_images:
+        return await _inline_images(text)
+    return _strip_images(text)
 
 
 # --- MCP Tools (thin proxies over Refero) ---
@@ -118,8 +162,7 @@ async def _refero_call(tool_name: str, args: dict) -> str:
 async def search_ux_patterns(query: str, platform: str = "web", page: int = 1) -> str:
     """
     Find UI/UX screen patterns from real shipped apps via Refero (135k+ screens).
-    Query is auto-translated to English (Refero's search language). ALWAYS answer the user
-    in Vietnamese or English.
+    Returns up to 3 actual screenshots as inline images. ALWAYS answer in Vietnamese or English.
 
     Args:
         query: What to look for, e.g. "onboarding flow fintech", "empty state payment"
@@ -128,15 +171,18 @@ async def search_ux_patterns(query: str, platform: str = "web", page: int = 1) -
     """
     eq = await _english_query(query)
     return await _refero_call("refero_search_screens",
-                              {"query": eq, "platform": _platform(platform), "page": page})
+                              {"query": eq, "platform": _platform(platform), "page": page},
+                              inline_images=True)
 
 
 @mcp.tool()
 async def search_user_flows(query: str, platform: str = "web", page: int = 1) -> str:
     """
-    Search user flows (sequences of connected screens showing how users complete a task)
-    from real apps via Refero. To compare apps, search a feature then inspect flows with
-    get_ux_flow. ALWAYS answer the user in Vietnamese or English.
+    Search user flows (sequences of connected screens) from real apps via Refero.
+    Returns flow metadata WITHOUT inline screenshots (flows have many screens).
+    IMPORTANT: When presenting flow results, describe the SCREEN ANATOMY of each step —
+    layout structure, key UI elements, navigation patterns, CTA placement — rather than
+    trying to display images. ALWAYS answer in Vietnamese or English.
 
     Args:
         query: Flow to look for, e.g. "KYC flow", "payment confirmation"
@@ -145,43 +191,52 @@ async def search_user_flows(query: str, platform: str = "web", page: int = 1) ->
     """
     eq = await _english_query(query)
     return await _refero_call("refero_search_flows",
-                              {"query": eq, "platform": _platform(platform), "page": page})
+                              {"query": eq, "platform": _platform(platform), "page": page},
+                              inline_images=False)
 
 
 @mcp.tool()
 async def search_design_styles(query: str, page: int = 1) -> str:
     """
     Search Refero's curated design styles (visual/style references) by meaning.
-    ALWAYS answer the user in Vietnamese or English.
+    Returns up to 3 actual screenshots as inline images. ALWAYS answer in Vietnamese or English.
 
     Args:
         query: Style to look for, e.g. "dark fintech dashboard"
         page: Result page (default 1)
     """
     eq = await _english_query(query)
-    return await _refero_call("refero_search_styles", {"query": eq, "page": page})
+    return await _refero_call("refero_search_styles", {"query": eq, "page": page},
+                              inline_images=True)
 
 
 @mcp.tool()
 async def get_ux_screen(screen_id: str) -> str:
     """
     Get full details of a Refero screen by its UUID (from a search result).
+    Returns the actual screenshot as an inline image. ALWAYS answer in Vietnamese or English.
 
     Args:
         screen_id: The screen UUID
     """
-    return await _refero_call("refero_get_screen", {"screen_id": screen_id})
+    return await _refero_call("refero_get_screen", {"screen_id": screen_id},
+                              inline_images=True)
 
 
 @mcp.tool()
 async def get_ux_flow(flow_id: int) -> str:
     """
     Get full details of a Refero user flow by its numeric id (from a search result).
+    Returns flow metadata WITHOUT inline screenshots (flows have many screens).
+    IMPORTANT: When presenting flow results, describe the SCREEN ANATOMY of each step —
+    layout structure, key UI elements, navigation patterns, CTA placement — rather than
+    trying to display images. ALWAYS answer in Vietnamese or English.
 
     Args:
         flow_id: The flow id (number)
     """
-    return await _refero_call("refero_get_flow", {"flow_id": flow_id})
+    return await _refero_call("refero_get_flow", {"flow_id": flow_id},
+                              inline_images=False)
 
 
 if __name__ == "__main__":
