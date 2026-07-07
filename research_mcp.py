@@ -48,6 +48,11 @@ from youtube_mcp import (
     list_indexed_videos, get_youtube_status,
 )
 
+# Knowledge Graph
+from kg_extract import (
+    _init_kg_db, search_kg, get_relationships, get_kg_stats,
+)
+
 load_dotenv()
 
 mcp = FastMCP(
@@ -137,6 +142,22 @@ def search_competitor_content(
             f"Published: {md.get('published_at', '?')}\n"
             f"Content: {md.get('text', '')}\n"
         )
+
+    # Enrich with Knowledge Graph context
+    try:
+        kg_entities = search_kg(query, top_k=5)
+        if kg_entities:
+            out.append("\n═══ Knowledge Graph Context ═══\n")
+            for ent in kg_entities:
+                out.append(f"• {ent['name']} ({ent['type']}): {ent['description']}")
+                rels = get_relationships(ent["name"])
+                if rels:
+                    rel_strs = [f"{r['source']} → {r['target']}: {r['description']}" for r in rels[:3]]
+                    out.append(f"  Relationships: {'; '.join(rel_strs)}")
+                out.append("")
+    except Exception:
+        pass  # KG enrichment is best-effort
+
     return "".join(out)
 
 
@@ -326,6 +347,22 @@ def search_industry_trends(query: str, topic: str = "", from_date: str = "",
             f"Published: {md.get('published_at', '?')}\n"
             f"{md.get('description', '')}\n"
         )
+
+    # Enrich with Knowledge Graph context
+    try:
+        kg_entities = search_kg(query, top_k=5)
+        if kg_entities:
+            out.append("\n═══ Knowledge Graph Context ═══\n")
+            for ent in kg_entities:
+                out.append(f"• {ent['name']} ({ent['type']}): {ent['description']}")
+                rels = get_relationships(ent["name"])
+                if rels:
+                    rel_strs = [f"{r['source']} → {r['target']}: {r['description']}" for r in rels[:3]]
+                    out.append(f"  Relationships: {'; '.join(rel_strs)}")
+                out.append("")
+    except Exception:
+        pass
+
     return "".join(out)
 
 
@@ -705,6 +742,90 @@ def get_research_status() -> str:
     return "\n".join(lines)
 
 
+# ═══════════════════ Knowledge Graph Tools ═══════════════════
+
+@mcp.tool()
+def search_knowledge_graph(
+    query: str, entity_type: str = "", top_k: int = 10,
+) -> str:
+    """
+    Search the knowledge graph for entities (companies, products, features, strategies,
+    technologies, people, etc.) extracted from competitor content.
+    Returns semantically similar entities with their descriptions and relationships.
+    ALWAYS answer in Vietnamese or English.
+
+    Args:
+        query: What to search for, e.g. "ZaloPay payment features", "MoMo partnerships"
+        entity_type: Filter by type: company, product, feature, strategy, technology, person, market, partnership, metric, regulation (optional)
+        top_k: Number of results (default 10)
+    """
+    if not PINECONE_API_KEY or not OPENAI_API_KEY:
+        return "Error: PINECONE_API_KEY or OPENAI_API_KEY not set."
+    try:
+        results = search_kg(query, entity_type=entity_type, top_k=top_k)
+    except Exception as e:
+        return f"KG search error: {e}"
+    if not results:
+        return "No knowledge graph entities found for this query."
+    lines = []
+    for r in results:
+        lines.append(f"• **{r['name']}** ({r['type']}) — score {r['score']:.2f}")
+        lines.append(f"  {r['description']}")
+        if r.get("competitor_names") and r["competitor_names"] != "[]":
+            lines.append(f"  Competitors: {r['competitor_names']}")
+        # Fetch relationships for this entity
+        rels = get_relationships(r["name"])
+        if rels:
+            rel_strs = [f"{rel['source']} → {rel['target']}: {rel['description']}" for rel in rels[:3]]
+            lines.append(f"  Relationships: {'; '.join(rel_strs)}")
+        lines.append("")
+    return "\n".join(lines)
+
+
+@mcp.tool()
+def get_entity_relationships(entity_name: str) -> str:
+    """
+    Get all relationships involving a specific entity from the knowledge graph.
+    Shows how the entity connects to other companies, products, features, etc.
+    ALWAYS answer in Vietnamese or English.
+
+    Args:
+        entity_name: The entity name to look up, e.g. "ZaloPay", "MoMo"
+    """
+    rels = get_relationships(entity_name)
+    if not rels:
+        return f"No relationships found for '{entity_name}' in the knowledge graph."
+    lines = [f"Relationships for **{entity_name}** ({len(rels)} total):\n"]
+    for r in rels:
+        direction = "→" if r["source"].lower() == entity_name.lower() else "←"
+        other = r["target"] if r["source"].lower() == entity_name.lower() else r["source"]
+        lines.append(f"• {entity_name} {direction} **{other}** (strength {r['strength']}/10)")
+        lines.append(f"  {r['description']}")
+        if r.get("keywords"):
+            lines.append(f"  Keywords: {r['keywords']}")
+    return "\n".join(lines)
+
+
+@mcp.tool()
+def get_knowledge_graph_stats() -> str:
+    """
+    Get statistics about the knowledge graph: total entities, relationships, and type distribution.
+    Useful for understanding how much competitive intelligence has been extracted.
+    ALWAYS answer in Vietnamese or English.
+    """
+    stats = get_kg_stats()
+    lines = [
+        f"Knowledge Graph Statistics:",
+        f"• Entities: {stats['entities']}",
+        f"• Relationships: {stats['relationships']}",
+    ]
+    if stats.get("types"):
+        lines.append("• Entity types:")
+        for t, count in stats["types"].items():
+            lines.append(f"  - {t}: {count}")
+    return "\n".join(lines)
+
+
 # ═══════════════════ UX + YouTube (re-register from their modules) ═══════════════════
 
 for _fn in [
@@ -720,6 +841,7 @@ def init_on_startup():
     """Initialize all DBs and start auto-crawl."""
     _init_news_db()
     _init_reviews_db()
+    _init_kg_db()
     auto_crawl_on_startup()
 
 
@@ -728,4 +850,5 @@ if __name__ == "__main__":
     _load_competitors()
     _init_news_db()
     _init_reviews_db()
+    _init_kg_db()
     mcp.run(transport="stdio")

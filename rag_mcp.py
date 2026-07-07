@@ -102,6 +102,10 @@ def _init_db():
         );
     """)
     conn.commit()
+
+    # Initialize knowledge graph tables
+    from kg_extract import _init_kg_db
+    _init_kg_db()
     conn.close()
 
 
@@ -459,6 +463,13 @@ def _crawl_source(source_id: str, name: str, source_url: str, stype: str, js_ren
 
         for batch_start in range(0, len(vectors), 100):
             index.upsert(vectors=vectors[batch_start : batch_start + 100])
+
+        # Knowledge graph extraction (runs inline, non-blocking for crawl)
+        try:
+            from kg_extract import extract_knowledge
+            extract_knowledge(content, competitor_name=name, source_url=art_url)
+        except Exception as e:
+            logger.warning(f"[kg] extraction failed for {art_url}: {e}")
 
         if existing:
             conn.execute(
