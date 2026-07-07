@@ -1,13 +1,17 @@
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response
+import asyncio
 import httpx
+import logging
 import research_mcp
 from research_mcp import mcp as research_mcp_server, init_on_startup
 import contextlib
 import os
 import uvicorn
 from urllib.parse import urlparse
+
+logger = logging.getLogger(__name__)
 
 # AUTH TEMPORARILY DISABLED — uncomment to re-enable
 # from src.auth import AuthMiddleware
@@ -24,13 +28,36 @@ from urllib.parse import urlparse
 # }
 
 
+RENDER_URL = os.getenv("RENDER_EXTERNAL_URL", "").rstrip("/")
+PING_INTERVAL = 600  # 10 minutes
+
+
+async def _keep_alive():
+    """Ping our own /health endpoint every 10 minutes to prevent Render spin-down."""
+    if not RENDER_URL:
+        logger.info("RENDER_EXTERNAL_URL not set — keep-alive disabled")
+        return
+    url = f"{RENDER_URL}/health"
+    logger.info(f"Keep-alive started: pinging {url} every {PING_INTERVAL}s")
+    while True:
+        await asyncio.sleep(PING_INTERVAL)
+        try:
+            async with httpx.AsyncClient(timeout=10) as c:
+                r = await c.get(url)
+                logger.debug(f"Keep-alive ping: {r.status_code}")
+        except Exception as e:
+            logger.warning(f"Keep-alive ping failed: {e}")
+
+
 @contextlib.asynccontextmanager
 async def lifespan(app: FastAPI):
     async with contextlib.AsyncExitStack() as stack:
         await stack.enter_async_context(research_mcp_server.session_manager.run())
         print("Starting up MCP Server...")
         init_on_startup()
+        ping_task = asyncio.create_task(_keep_alive())
         yield
+        ping_task.cancel()
         print("Shutting down MCP Server...")
 
 app = FastAPI(title="MCP Server", version="1.0.0", lifespan=lifespan)
@@ -47,6 +74,11 @@ app.add_middleware(
 # @app.get("/.well-known/oauth-protected-resource/research/mcp")
 # async def research_oauth_metadata():
 #     return RESEARCH_METADATA
+
+
+@app.get("/health")
+async def health():
+    return {"status": "ok"}
 
 
 ALLOWED_IMAGE_HOSTS = {"images.refero.design", "refero.design"}
