@@ -17,4 +17,5 @@ dependencies = [
     "openai>=2.44.0",
     "google-play-scraper>=1.2.7",
     "yt-dlp>=2025.6.9",
+    "TikTokApi>=6.5.0",
 ]

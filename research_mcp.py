@@ -57,7 +57,7 @@ from kg_extract import (
 from tiktok_mcp import (
     _init_tiktok_db,
     get_kol_profile, get_kol_videos, analyze_kol, compare_kols,
-    discover_kols, get_hashtag_performance, get_video_comments,
+    search_tiktok_users, get_hashtag_info,
     track_kol, untrack_kol, get_tracked_kols,
 )
 
@@ -840,7 +840,7 @@ for _fn in [
     search_ux_patterns, search_user_flows, search_design_styles, get_ux_screen, get_ux_flow,
     search_video_content, crawl_youtube_topic, get_video_transcript, list_indexed_videos, get_youtube_status,
     get_kol_profile, get_kol_videos, analyze_kol, compare_kols,
-    discover_kols, get_hashtag_performance, get_video_comments,
+    search_tiktok_users, get_hashtag_info,
     track_kol, untrack_kol, get_tracked_kols,
 ]:
     mcp.tool()(_fn)
