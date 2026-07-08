@@ -422,6 +422,7 @@ def _score_kol(profile: dict, metrics: dict) -> dict:
 def _format_profile(p: dict) -> str:
     return (
         f"@{p['username']} ({p['nickname']})\n"
+        f"  Profile: https://www.tiktok.com/@{p['username']}\n"
         f"  Bio: {p['bio'][:200]}\n"
         f"  Verified: {'Yes' if p['verified'] else 'No'} | Tier: {p['tier']}\n"
         f"  Followers: {_fmt(p['follower_count'])} | Following: {_fmt(p['following_count'])}\n"
@@ -431,8 +432,10 @@ def _format_profile(p: dict) -> str:
 
 def _format_video(v: dict, idx: int) -> str:
     tags = " ".join(f"#{h}" for h in v["hashtags"][:5])
+    vid_url = f"https://www.tiktok.com/@{v['username']}/video/{v['video_id']}"
     return (
         f"\n  [{idx}] {v['description'][:100]}\n"
+        f"      URL: {vid_url}\n"
         f"      Views: {_fmt(v['play_count'])} | Likes: {_fmt(v['digg_count'])} | "
         f"Comments: {_fmt(v['comment_count'])} | Shares: {_fmt(v['share_count'])} | "
         f"Saves: {_fmt(v['collect_count'])}\n"
@@ -732,6 +735,7 @@ def search_tiktok_users(query: str, count: int = 10) -> str:
         v = " (verified)" if u["verified"] else ""
         lines.append(
             f"  {i}. @{u['username']}{v} ({u['nickname']})\n"
+            f"     Profile: https://www.tiktok.com/@{u['username']}\n"
             f"     {u['bio']}\n"
             f"     Followers: {_fmt(u['followers'])} | Likes: {_fmt(u['likes'])} | "
             f"Videos: {u['videos']} | Tier: {_tier(u['followers'])}"
@@ -761,6 +765,7 @@ def get_hashtag_info(hashtag: str) -> str:
     challenge_id = challenge.get("id", "")
     lines = [
         f"=== Hashtag: #{challenge.get('title', hashtag)} ===\n",
+        f"  URL: https://www.tiktok.com/tag/{hashtag}",
         f"  Description: {challenge.get('desc') or 'N/A'}",
         f"  Views: {_fmt(_parse_int(stats.get('viewCount', 0)))}",
         f"  Videos: {_fmt(_parse_int(stats.get('videoCount', 0)))}",
@@ -785,8 +790,12 @@ def get_hashtag_info(hashtag: str) -> str:
                         _parse_int(st.get("commentCount", 0)),
                         _parse_int(st.get("shareCount", 0)),
                     )
+                    vid_id = v.get("id", "")
+                    uid = author.get('uniqueId', '?')
+                    vid_url = f"https://www.tiktok.com/@{uid}/video/{vid_id}" if vid_id else ""
                     lines.append(
-                        f"    {i}. @{author.get('uniqueId', '?')} — {v.get('desc', '')[:80]}\n"
+                        f"    {i}. @{uid} — {v.get('desc', '')[:80]}\n"
+                        f"       URL: {vid_url}\n"
                         f"       Views: {_fmt(plays)} | Likes: {_fmt(likes)} | ER: {er}%"
                     )
         except Exception as e:
@@ -862,6 +871,7 @@ def get_tracked_kols() -> str:
         v = " (verified)" if verified else ""
         lines.append(
             f"  @{username}{v} ({nick}) — {tier}\n"
+            f"    Profile: https://www.tiktok.com/@{username}\n"
             f"    Followers: {_fmt(followers)} | Total Likes: {_fmt(hearts)} | "
             f"Videos: {vids} | Updated: {updated[:10] if updated else '?'}"
         )

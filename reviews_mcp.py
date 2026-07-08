@@ -645,13 +645,27 @@ def search_app_reviews(query: str, app: str = "", platform: str = "", rating_max
     if not matches:
         return "No reviews found. Run trigger_crawl first."
 
+    # Build app store URL lookup from config
+    apps_cfg = _load_apps()
+    def _store_url(app_name: str, platform: str) -> str:
+        ids = apps_cfg.get(app_name, {})
+        if platform == "android" and ids.get("android"):
+            return f"https://play.google.com/store/apps/details?id={ids['android']}&hl=vi"
+        if platform == "ios" and ids.get("ios"):
+            return f"https://apps.apple.com/vn/app/id{ids['ios']}"
+        return ""
+
     out = [f"Found {len(matches)} reviews for: '{query}'\n"]
     for m in matches:
         md = m.metadata
         r = int(md.get("rating") or 0)
+        app_name = md.get('app', '?')
+        plat = md.get('platform', '?')
+        link = _store_url(app_name, plat)
         out.append(
-            f"\n--- [{md.get('app', '?')}/{md.get('platform', '?')}] "
+            f"\n--- [{app_name}/{plat}] "
             f"{'★' * r}{'☆' * (5 - r)} {md.get('review_date', '')} (score {m.score:.3f}) ---\n"
+            f"App Store: {link}\n"
             f"{(md.get('title') + chr(10)) if md.get('title') else ''}{md.get('text', '')}\n"
         )
     return "".join(out)

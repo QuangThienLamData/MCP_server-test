@@ -353,6 +353,7 @@ def _index_comments(comments: list[dict], brand: str, post_id: str) -> int:
             "brand": brand,
             "post_id": post_id,
             "comment_id": cid,
+            "url": f"https://www.facebook.com/{post_id}",
             "author_name": author.get("name", ""),
             "reactions_count": int(c.get("reactions_count") or 0),
             "published_at": _ts_to_iso(ct),
@@ -619,7 +620,9 @@ def get_facebook_post_comments(post_url_or_id: str, brand: str = "", limit: int 
     if brand:
         _index_comments(comments, brand, post_id)
 
-    lines = [f"Fetched {len(comments)} comments on post {post_id}:\n"]
+    post_url = f"https://www.facebook.com/{post_id}"
+    lines = [f"Fetched {len(comments)} comments on post {post_id}:\n"
+             f"Post URL: {post_url}\n"]
     for i, c in enumerate(comments, 1):
         author = c.get("author", {}).get("name", "?")
         msg = c.get("message", "")[:200]
@@ -775,11 +778,14 @@ def search_facebook_ads(
         if not body:
             body = (snap.get("caption") or "")[:200]
 
+        ad_id = ad.get('ad_archive_id', '')
+        ad_url = f"https://www.facebook.com/ads/library/?id={ad_id}" if ad_id else ""
         lines.append(
             f"\n[{i}] {'ACTIVE' if is_active else 'INACTIVE'} — {page_name}\n"
             f"    {body}\n"
             f"    CTA: {cta}\n"
-            f"    Ad ID: {ad.get('ad_archive_id', '?')}"
+            f"    Ad ID: {ad_id or '?'}\n"
+            f"    URL: {ad_url}"
         )
     return "\n".join(lines)
 
