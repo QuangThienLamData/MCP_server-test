@@ -1,25 +1,26 @@
 """TikTok KOL/KOC Intelligence — evaluate and compare influencers in Vietnam.
 
-Uses davidteather/TikTok-Api (Playwright-based) to fetch KOL profiles and video
-metrics, stores in SQLite for comparison and tracking, and provides LLM-powered
-analysis for campaign evaluation.
+Uses RapidAPI tiktok-api23 proxy to fetch KOL profiles, videos, hashtags, and
+search results. No Playwright/Chromium needed — pure HTTP API calls.
 
-Setup:
-  pip install TikTokApi && python -m playwright install chromium
-  Set TIKTOK_MS_TOKEN env var (extract from tiktok.com cookies)
-
-NOTE: Playwright (headless Chromium) needs ~300MB RAM.  On Render free tier
-(512MB) this may OOM — run on a larger plan or a separate service.
+Endpoints used (tiktok-api23.p.rapidapi.com):
+  GET /api/user/info          — profile by uniqueId
+  GET /api/user/posts         — videos by secUid (paginated)
+  GET /api/search/general     — search videos by keyword
+  GET /api/challenge/info     — hashtag stats
+  GET /api/challenge/posts    — videos under a hashtag
+  GET /api/user/followers     — follower list
 """
 
-import asyncio
 import json
 import logging
 import os
 import sqlite3
+import time
 from datetime import datetime, timezone
 from statistics import mean, stdev
 
+import httpx
 from dotenv import load_dotenv
 
 from rag_mcp import DB_PATH, OPENAI_API_KEY, _get_openai
@@ -28,60 +29,38 @@ load_dotenv()
 
 logger = logging.getLogger(__name__)
 
-TIKTOK_MS_TOKEN = os.getenv("TIKTOK_MS_TOKEN", "")
-
-# ---------------------------------------------------------------------------
-# Lazy TikTok API session
-# ---------------------------------------------------------------------------
-
-_api = None
-
-
-async def _ensure_api():
-    """Lazy-init the TikTokApi with a Playwright browser session."""
-    global _api
-    if _api is not None:
-        return _api
-    if not TIKTOK_MS_TOKEN:
-        raise RuntimeError(
-            "TIKTOK_MS_TOKEN not set. Go to tiktok.com → DevTools → "
-            "Application → Cookies → copy the ms_token value, then set "
-            "it as an env var."
-        )
-    try:
-        from TikTokApi import TikTokApi
-    except ImportError:
-        raise RuntimeError(
-            "TikTokApi not installed. Run:\n"
-            "  pip install TikTokApi && python -m playwright install chromium"
-        )
-    api = TikTokApi()
-    await api.__aenter__()
-    await api.create_sessions(
-        ms_tokens=[TIKTOK_MS_TOKEN],
-        num_sessions=1,
-        sleep_after=3,
-        headless=True,
-        browser=os.getenv("TIKTOK_BROWSER", "chromium"),
-    )
-    _api = api
-    logger.info("[tiktok] API session created")
-    return api
-
-
-async def _reset_api():
-    """Tear down the current session so the next call re-creates it."""
-    global _api
-    if _api:
-        try:
-            await _api.__aexit__(None, None, None)
-        except Exception:
-            pass
-    _api = None
+RAPIDAPI_KEY = os.getenv("RAPIDAPI_TT_KEY", "") or os.getenv("RAPIDAPI_FB_KEY", "")
+RAPIDAPI_HOST = "tiktok-api23.p.rapidapi.com"
+RAPIDAPI_BASE = f"https://{RAPIDAPI_HOST}"
 
 
 # ---------------------------------------------------------------------------
-# SQLite
+# API helpers
+# ---------------------------------------------------------------------------
+
+def _tt_api(path: str, params: dict, timeout: int = 20, retries: int = 3) -> dict:
+    """GET request to TikTok RapidAPI with retry on 429."""
+    headers = {
+        "x-rapidapi-key": RAPIDAPI_KEY,
+        "x-rapidapi-host": RAPIDAPI_HOST,
+    }
+    with httpx.Client(timeout=timeout) as c:
+        for attempt in range(retries):
+            r = c.get(f"{RAPIDAPI_BASE}{path}", params=params, headers=headers)
+            if r.status_code == 429:
+                wait = 2 ** (attempt + 1)
+                logger.info(f"TikTok API rate limited, waiting {wait}s...")
+                time.sleep(wait)
+                continue
+            if r.status_code == 204:
+                return {}
+            r.raise_for_status()
+            return r.json()
+    return {}
+
+
+# ---------------------------------------------------------------------------
+# SQLite (same schema as before)
 # ---------------------------------------------------------------------------
 
 def _init_tiktok_db():
@@ -161,20 +140,35 @@ def _fmt(n: int) -> str:
     return str(n)
 
 
+def _parse_int(val) -> int:
+    """Parse a value that might be str or int to int."""
+    if val is None:
+        return 0
+    try:
+        return int(val)
+    except (ValueError, TypeError):
+        return 0
+
+
 # ---------------------------------------------------------------------------
-# Data fetching
+# Data fetching via RapidAPI
 # ---------------------------------------------------------------------------
 
-async def _fetch_profile(username: str) -> dict:
-    """Fetch a user profile from TikTok and cache in SQLite."""
-    api = await _ensure_api()
-    user = api.user(username)
-    data = await user.info()
+def _fetch_profile(username: str) -> dict:
+    """Fetch a user profile from TikTok API and cache in SQLite."""
+    if not RAPIDAPI_KEY:
+        raise RuntimeError("RAPIDAPI_TT_KEY not set. Set it to your RapidAPI key.")
 
-    # TikTok nests data differently across versions
+    data = _tt_api("/api/user/info", {"uniqueId": username})
+    if not data:
+        raise RuntimeError(f"Empty response for @{username}")
+
     user_info = data.get("userInfo", {})
-    ud = user_info.get("user", data.get("user", {}))
-    st = user_info.get("stats", data.get("stats", {}))
+    ud = user_info.get("user", {})
+    st = user_info.get("stats", {})
+
+    if not ud.get("uniqueId"):
+        raise RuntimeError(f"User @{username} not found.")
 
     profile = {
         "username": ud.get("uniqueId", username),
@@ -182,11 +176,11 @@ async def _fetch_profile(username: str) -> dict:
         "nickname": ud.get("nickname", ""),
         "bio": ud.get("signature", ""),
         "verified": 1 if ud.get("verified") else 0,
-        "follower_count": st.get("followerCount", 0),
-        "following_count": st.get("followingCount", 0),
-        "heart_count": st.get("heartCount", st.get("heart", 0)),
-        "video_count": st.get("videoCount", 0),
-        "digg_count": st.get("diggCount", 0),
+        "follower_count": _parse_int(st.get("followerCount", 0)),
+        "following_count": _parse_int(st.get("followingCount", 0)),
+        "heart_count": _parse_int(st.get("heartCount", st.get("heart", 0))),
+        "video_count": _parse_int(st.get("videoCount", 0)),
+        "digg_count": _parse_int(st.get("diggCount", 0)),
         "avatar_url": ud.get("avatarLarger", ""),
         "tier": "",
     }
@@ -218,66 +212,95 @@ async def _fetch_profile(username: str) -> dict:
     return profile
 
 
-async def _fetch_videos(username: str, count: int = 20) -> list[dict]:
-    """Fetch recent videos for a user and cache in SQLite."""
-    api = await _ensure_api()
-    user = api.user(username)
+def _fetch_videos(username: str, sec_uid: str = "", count: int = 20) -> list[dict]:
+    """Fetch recent videos for a user via RapidAPI and cache in SQLite."""
+    if not RAPIDAPI_KEY:
+        raise RuntimeError("RAPIDAPI_TT_KEY not set.")
+
+    # Need secUid for user/posts — fetch profile first if not provided
+    if not sec_uid:
+        profile = _fetch_profile(username)
+        sec_uid = profile.get("sec_uid", "")
+    if not sec_uid:
+        raise RuntimeError(f"Could not get secUid for @{username}")
 
     videos: list[dict] = []
     now = datetime.now(timezone.utc).isoformat()
     conn = sqlite3.connect(DB_PATH)
+    cursor = "0"
+    fetched = 0
 
-    async for video in user.videos(count=count):
-        d = video.as_dict
-        stats = d.get("statsV2", d.get("stats", {}))
+    while fetched < count:
+        batch = min(count - fetched, 30)
+        data = _tt_api("/api/user/posts", {
+            "secUid": sec_uid, "count": str(batch), "cursor": cursor,
+        })
+        if not data:
+            break
 
-        play = int(stats.get("playCount", 0))
-        digg = int(stats.get("diggCount", 0))
-        comment = int(stats.get("commentCount", 0))
-        share = int(stats.get("shareCount", 0))
-        collect = int(stats.get("collectCount", 0))
+        item_data = data.get("data", data)
+        items = item_data.get("itemList", [])
+        if not items:
+            break
 
-        hashtags = [
-            t.get("hashtagName", "")
-            for t in d.get("textExtra", [])
-            if t.get("hashtagName")
-        ]
-        music = d.get("music", {})
-        ct = d.get("createTime", 0)
-        create_time = (
-            datetime.fromtimestamp(ct, tz=timezone.utc).isoformat() if ct else ""
-        )
+        for d in items:
+            stats = d.get("statsV2", d.get("stats", {}))
 
-        vid = {
-            "video_id": str(d.get("id", "")),
-            "username": username,
-            "description": d.get("desc", ""),
-            "create_time": create_time,
-            "play_count": play,
-            "digg_count": digg,
-            "comment_count": comment,
-            "share_count": share,
-            "collect_count": collect,
-            "duration": d.get("video", {}).get("duration", 0),
-            "hashtags": hashtags,
-            "music_title": music.get("title", ""),
-            "engagement_rate": _engagement_rate(play, digg, comment, share),
-        }
-        videos.append(vid)
+            play = _parse_int(stats.get("playCount", 0))
+            digg = _parse_int(stats.get("diggCount", 0))
+            comment = _parse_int(stats.get("commentCount", 0))
+            share = _parse_int(stats.get("shareCount", 0))
+            collect = _parse_int(stats.get("collectCount", 0))
 
-        conn.execute(
-            "INSERT OR REPLACE INTO tiktok_videos "
-            "(video_id,username,description,create_time,play_count,digg_count,"
-            "comment_count,share_count,collect_count,duration,hashtags,"
-            "music_title,engagement_rate,raw_data,updated_at) "
-            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-            (
-                vid["video_id"], username, vid["description"], vid["create_time"],
-                play, digg, comment, share, collect, vid["duration"],
-                json.dumps(hashtags), vid["music_title"], vid["engagement_rate"],
-                json.dumps(d, ensure_ascii=False, default=str), now,
-            ),
-        )
+            hashtags = [
+                t.get("hashtagName", "")
+                for t in d.get("textExtra", [])
+                if t.get("hashtagName")
+            ]
+            music = d.get("music", {})
+            ct = d.get("createTime", 0)
+            create_time = (
+                datetime.fromtimestamp(int(ct), tz=timezone.utc).isoformat() if ct else ""
+            )
+
+            vid = {
+                "video_id": str(d.get("id", "")),
+                "username": username,
+                "description": d.get("desc", ""),
+                "create_time": create_time,
+                "play_count": play,
+                "digg_count": digg,
+                "comment_count": comment,
+                "share_count": share,
+                "collect_count": collect,
+                "duration": d.get("video", {}).get("duration", 0),
+                "hashtags": hashtags,
+                "music_title": music.get("title", ""),
+                "engagement_rate": _engagement_rate(play, digg, comment, share),
+            }
+            videos.append(vid)
+
+            conn.execute(
+                "INSERT OR REPLACE INTO tiktok_videos "
+                "(video_id,username,description,create_time,play_count,digg_count,"
+                "comment_count,share_count,collect_count,duration,hashtags,"
+                "music_title,engagement_rate,raw_data,updated_at) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (
+                    vid["video_id"], username, vid["description"], vid["create_time"],
+                    play, digg, comment, share, collect, vid["duration"],
+                    json.dumps(hashtags), vid["music_title"], vid["engagement_rate"],
+                    json.dumps(d, ensure_ascii=False, default=str), now,
+                ),
+            )
+
+        fetched += len(items)
+        has_more = item_data.get("hasMore", False)
+        next_cursor = str(item_data.get("cursor", ""))
+        if not has_more or not next_cursor or next_cursor == cursor:
+            break
+        cursor = next_cursor
+        time.sleep(0.5)
 
     conn.commit()
     conn.close()
@@ -285,11 +308,10 @@ async def _fetch_videos(username: str, count: int = 20) -> list[dict]:
 
 
 # ---------------------------------------------------------------------------
-# Metrics & Scoring
+# Metrics & Scoring (unchanged logic)
 # ---------------------------------------------------------------------------
 
 def _compute_metrics(profile: dict, videos: list[dict]) -> dict:
-    """Derive performance metrics from raw profile + video data."""
     if not videos:
         return {}
 
@@ -300,7 +322,6 @@ def _compute_metrics(profile: dict, videos: list[dict]) -> dict:
     saves = [v["collect_count"] for v in videos]
     ers = [v["engagement_rate"] for v in videos if v["engagement_rate"] > 0]
 
-    # Posting frequency
     dates = sorted([v["create_time"] for v in videos if v["create_time"]])
     if len(dates) >= 2:
         first = datetime.fromisoformat(dates[0])
@@ -310,7 +331,6 @@ def _compute_metrics(profile: dict, videos: list[dict]) -> dict:
     else:
         posts_per_week = 0
 
-    # Hashtag frequency
     all_tags: list[str] = []
     for v in videos:
         all_tags.extend(v["hashtags"])
@@ -345,7 +365,6 @@ def _compute_metrics(profile: dict, videos: list[dict]) -> dict:
 
 
 def _score_kol(profile: dict, metrics: dict) -> dict:
-    """Score a KOL on 5 dimensions (0-100) → weighted overall score."""
     avg_views = metrics.get("avg_views", 0)
     if avg_views >= 1_000_000:   reach = 100
     elif avg_views >= 500_000:   reach = 90
@@ -428,7 +447,6 @@ def _format_video(v: dict, idx: int) -> str:
 # ---------------------------------------------------------------------------
 
 def _llm_evaluate(profile: dict, metrics: dict, scores: dict) -> str:
-    """GPT-4o-mini campaign evaluation summary in Vietnamese."""
     prompt = (
         "You are a KOL/influencer marketing expert for the Vietnam market.\n"
         "Analyze this TikTok KOL and provide a concise evaluation.\n\n"
@@ -463,7 +481,7 @@ def _llm_evaluate(profile: dict, metrics: dict, scores: dict) -> str:
 # Tool functions (exported, registered by research_mcp.py)
 # ---------------------------------------------------------------------------
 
-async def get_kol_profile(username: str):
+def get_kol_profile(username: str) -> str:
     """
     Fetch a TikTok KOL/KOC profile with key metrics: followers, likes, video count,
     tier classification, and bio. Data is cached for comparison.
@@ -472,17 +490,16 @@ async def get_kol_profile(username: str):
     Args:
         username: TikTok username (without @), e.g. "therock"
     """
+    if not RAPIDAPI_KEY:
+        return "Error: RAPIDAPI_TT_KEY not set."
     try:
-        profile = await _fetch_profile(username)
-    except RuntimeError as e:
-        return str(e)
+        profile = _fetch_profile(username)
     except Exception as e:
-        await _reset_api()
         return f"Failed to fetch @{username}: {e}"
     return _format_profile(profile)
 
 
-async def get_kol_videos(username: str, count: int = 20):
+def get_kol_videos(username: str, count: int = 20) -> str:
     """
     Fetch recent TikTok videos of a KOL/KOC with performance metrics per video:
     views, likes, comments, shares, saves, engagement rate, duration, hashtags.
@@ -492,13 +509,12 @@ async def get_kol_videos(username: str, count: int = 20):
         username: TikTok username (without @)
         count: Number of recent videos to fetch (default 20, max 50)
     """
+    if not RAPIDAPI_KEY:
+        return "Error: RAPIDAPI_TT_KEY not set."
     count = min(max(count, 1), 50)
     try:
-        videos = await _fetch_videos(username, count)
-    except RuntimeError as e:
-        return str(e)
+        videos = _fetch_videos(username, count=count)
     except Exception as e:
-        await _reset_api()
         return f"Failed to fetch videos for @{username}: {e}"
 
     if not videos:
@@ -510,7 +526,7 @@ async def get_kol_videos(username: str, count: int = 20):
     return "\n".join(lines)
 
 
-async def analyze_kol(username: str, video_count: int = 30):
+def analyze_kol(username: str, video_count: int = 30) -> str:
     """
     Deep analysis of a TikTok KOL/KOC: fetches profile + recent videos, computes
     engagement metrics, scores on 5 dimensions (reach, engagement, consistency,
@@ -522,14 +538,13 @@ async def analyze_kol(username: str, video_count: int = 30):
         username: TikTok username (without @)
         video_count: How many recent videos to analyze (default 30)
     """
+    if not RAPIDAPI_KEY:
+        return "Error: RAPIDAPI_TT_KEY not set."
     video_count = min(max(video_count, 5), 50)
     try:
-        profile = await _fetch_profile(username)
-        videos = await _fetch_videos(username, video_count)
-    except RuntimeError as e:
-        return str(e)
+        profile = _fetch_profile(username)
+        videos = _fetch_videos(username, sec_uid=profile.get("sec_uid", ""), count=video_count)
     except Exception as e:
-        await _reset_api()
         return f"Failed to analyze @{username}: {e}"
 
     if not videos:
@@ -564,7 +579,7 @@ async def analyze_kol(username: str, video_count: int = 30):
 
     if OPENAI_API_KEY:
         try:
-            summary = await asyncio.to_thread(_llm_evaluate, profile, metrics, scores)
+            summary = _llm_evaluate(profile, metrics, scores)
             lines.append(f"\n--- AI Evaluation ---\n{summary}")
         except Exception as e:
             logger.warning(f"[tiktok] LLM evaluation failed: {e}")
@@ -572,7 +587,7 @@ async def analyze_kol(username: str, video_count: int = 30):
     return "\n".join(lines)
 
 
-async def compare_kols(usernames: str):
+def compare_kols(usernames: str) -> str:
     """
     Compare multiple TikTok KOLs/KOCs side by side on all metrics and scores.
     Fetches fresh data for each, then ranks them by reach, engagement, and overall.
@@ -581,6 +596,8 @@ async def compare_kols(usernames: str):
     Args:
         usernames: Comma-separated TikTok usernames (2-5), e.g. "user1,user2,user3"
     """
+    if not RAPIDAPI_KEY:
+        return "Error: RAPIDAPI_TT_KEY not set."
     names = [u.strip().lstrip("@") for u in usernames.split(",") if u.strip()]
     if len(names) < 2:
         return "Please provide at least 2 usernames separated by commas."
@@ -592,8 +609,8 @@ async def compare_kols(usernames: str):
 
     for name in names:
         try:
-            profile = await _fetch_profile(name)
-            videos = await _fetch_videos(name, 30)
+            profile = _fetch_profile(name)
+            videos = _fetch_videos(name, sec_uid=profile.get("sec_uid", ""), count=30)
             metrics = _compute_metrics(profile, videos) if videos else {}
             scores = _score_kol(profile, metrics) if metrics else {
                 "overall": 0, "reach": 0, "engagement": 0,
@@ -605,11 +622,7 @@ async def compare_kols(usernames: str):
             })
         except Exception as e:
             errors.append(f"@{name}: {e}")
-            await _reset_api()
-            try:
-                await _ensure_api()
-            except Exception:
-                pass
+        time.sleep(0.5)
 
     if not results:
         return "Failed to fetch any KOL data.\n" + "\n".join(errors)
@@ -669,41 +682,47 @@ async def compare_kols(usernames: str):
     return "\n".join(lines)
 
 
-async def search_tiktok_users(query: str, count: int = 10):
+def search_tiktok_users(query: str, count: int = 10) -> str:
     """
-    Search for TikTok users/KOLs by keyword. Returns matching profiles with
-    basic metrics. Useful for discovering KOLs in a specific niche.
+    Search for TikTok users/KOLs by keyword. Uses general search and extracts
+    unique authors. Useful for discovering KOLs in a specific niche.
     ALWAYS answer in Vietnamese or English.
 
     Args:
         query: Search query, e.g. "vietnam beauty", "fintech review"
         count: Number of results (default 10, max 30)
     """
+    if not RAPIDAPI_KEY:
+        return "Error: RAPIDAPI_TT_KEY not set."
     count = min(max(count, 1), 30)
-    try:
-        api = await _ensure_api()
-    except RuntimeError as e:
-        return str(e)
 
-    try:
-        users = []
-        async for user in api.search.users(query, count=count):
-            d = user.as_dict
-            user_info = d.get("user_info", d)
-            ud = user_info.get("user", d)
-            st = user_info.get("stats", d.get("stats", {}))
-            users.append({
-                "username": ud.get("uniqueId", ud.get("unique_id", "?")),
-                "nickname": ud.get("nickname", ""),
-                "bio": ud.get("signature", "")[:100],
-                "verified": ud.get("verified", False),
-                "followers": st.get("followerCount", st.get("follower_count", 0)),
-                "likes": st.get("heartCount", st.get("heart_count", 0)),
-                "videos": st.get("videoCount", st.get("video_count", 0)),
-            })
-    except Exception as e:
-        await _reset_api()
-        return f"Search failed: {e}"
+    data = _tt_api("/api/search/general", {
+        "keyword": query, "count": str(count), "cursor": "0",
+    })
+    items = data.get("item_list", [])
+
+    if not items:
+        return f"No results found for '{query}'."
+
+    # Extract unique authors
+    seen: set[str] = set()
+    users: list[dict] = []
+    for item in items:
+        author = item.get("author", {})
+        uid = author.get("uniqueId", "")
+        if not uid or uid in seen:
+            continue
+        seen.add(uid)
+        author_stats = item.get("authorStats", {})
+        users.append({
+            "username": uid,
+            "nickname": author.get("nickname", ""),
+            "bio": author.get("signature", "")[:100],
+            "verified": author.get("verified", False),
+            "followers": _parse_int(author_stats.get("followerCount", 0)),
+            "likes": _parse_int(author_stats.get("heartCount", author_stats.get("heart", 0))),
+            "videos": _parse_int(author_stats.get("videoCount", 0)),
+        })
 
     if not users:
         return f"No users found for '{query}'."
@@ -720,7 +739,7 @@ async def search_tiktok_users(query: str, count: int = 10):
     return "\n".join(lines)
 
 
-async def get_hashtag_info(hashtag: str):
+def get_hashtag_info(hashtag: str) -> str:
     """
     Get TikTok hashtag statistics and top videos. Useful for understanding
     hashtag performance and finding KOLs in specific niches.
@@ -729,57 +748,49 @@ async def get_hashtag_info(hashtag: str):
     Args:
         hashtag: Hashtag name (without #), e.g. "fintechvietnam"
     """
+    if not RAPIDAPI_KEY:
+        return "Error: RAPIDAPI_TT_KEY not set."
     hashtag = hashtag.lstrip("#")
-    try:
-        api = await _ensure_api()
-    except RuntimeError as e:
-        return str(e)
 
-    try:
-        tag = api.hashtag(hashtag)
-        info = await tag.info()
-    except Exception as e:
-        await _reset_api()
-        return f"Failed to fetch #{hashtag}: {e}"
-
-    ch = info.get("challengeInfo", info)
+    # Get hashtag info
+    data = _tt_api("/api/challenge/info", {"challengeName": hashtag})
+    ch = data.get("challengeInfo", data)
     challenge = ch.get("challenge", ch)
-    stats = ch.get("stats", info.get("stats", {}))
+    stats = ch.get("stats", data.get("stats", {}))
 
+    challenge_id = challenge.get("id", "")
     lines = [
         f"=== Hashtag: #{challenge.get('title', hashtag)} ===\n",
-        f"  Description: {challenge.get('desc', 'N/A')}",
-        f"  Views: {_fmt(stats.get('viewCount', stats.get('videoCount', 0)))}",
-        f"  Videos: {_fmt(stats.get('videoCount', 0))}",
+        f"  Description: {challenge.get('desc') or 'N/A'}",
+        f"  Views: {_fmt(_parse_int(stats.get('viewCount', 0)))}",
+        f"  Videos: {_fmt(_parse_int(stats.get('videoCount', 0)))}",
     ]
 
-    try:
-        top_videos = []
-        async for video in tag.videos(count=10):
-            d = video.as_dict
-            st = d.get("statsV2", d.get("stats", {}))
-            author = d.get("author", {})
-            top_videos.append({
-                "desc": d.get("desc", "")[:80],
-                "author": author.get("uniqueId", "?"),
-                "plays": int(st.get("playCount", 0)),
-                "likes": int(st.get("diggCount", 0)),
-                "er": _engagement_rate(
-                    int(st.get("playCount", 0)),
-                    int(st.get("diggCount", 0)),
-                    int(st.get("commentCount", 0)),
-                    int(st.get("shareCount", 0)),
-                ),
+    # Get top videos for this hashtag
+    if challenge_id:
+        try:
+            vdata = _tt_api("/api/challenge/posts", {
+                "challengeId": str(challenge_id), "count": "10", "cursor": "0",
             })
-        if top_videos:
-            lines.append(f"\n  Top {len(top_videos)} videos:")
-            for i, v in enumerate(top_videos, 1):
-                lines.append(
-                    f"    {i}. @{v['author']} — {v['desc']}\n"
-                    f"       Views: {_fmt(v['plays'])} | Likes: {_fmt(v['likes'])} | ER: {v['er']}%"
-                )
-    except Exception as e:
-        lines.append(f"\n  (Could not fetch top videos: {e})")
+            vitems = vdata.get("itemList", [])
+            if vitems:
+                lines.append(f"\n  Top {len(vitems)} videos:")
+                for i, v in enumerate(vitems, 1):
+                    st = v.get("statsV2", v.get("stats", {}))
+                    author = v.get("author", {})
+                    plays = _parse_int(st.get("playCount", 0))
+                    likes = _parse_int(st.get("diggCount", 0))
+                    er = _engagement_rate(
+                        plays, likes,
+                        _parse_int(st.get("commentCount", 0)),
+                        _parse_int(st.get("shareCount", 0)),
+                    )
+                    lines.append(
+                        f"    {i}. @{author.get('uniqueId', '?')} — {v.get('desc', '')[:80]}\n"
+                        f"       Views: {_fmt(plays)} | Likes: {_fmt(likes)} | ER: {er}%"
+                    )
+        except Exception as e:
+            lines.append(f"\n  (Could not fetch top videos: {e})")
 
     return "\n".join(lines)
 
