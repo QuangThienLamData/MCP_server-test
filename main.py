@@ -128,6 +128,8 @@ async def internal_crawl(request: Request):
         out["news"] = research_mcp.crawl_news()
     if target in ("reviews", "all"):
         out["reviews"] = research_mcp.crawl_reviews(last_days=last_days)
+    if target in ("facebook", "fb", "all"):
+        out["facebook"] = research_mcp.crawl_facebook()
     if not out:
         return JSONResponse(status_code=400, content={"error": f"unknown target '{target}'"})
     return {"triggered": target, "results": out}

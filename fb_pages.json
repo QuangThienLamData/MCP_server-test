@@ -1,0 +1,47 @@
+{
+  "MoMo": {
+    "page_id": "100071559829371",
+    "url": "https://www.facebook.com/MoMo.vn",
+    "search_keywords": ["MoMo", "momo", "ví MoMo", "MoMo lỗi", "MoMo thanh toán"]
+  },
+  "ZaloPay": {
+    "page_id": "100068094211120",
+    "url": "https://www.facebook.com/Zalopay",
+    "search_keywords": ["ZaloPay", "zalopay", "Zalo Pay", "ZaloPay lỗi"]
+  },
+  "Grab": {
+    "page_id": "100064351795136",
+    "url": "https://www.facebook.com/Grab.vn",
+    "search_keywords": ["Grab", "GrabPay", "Grab lỗi", "GrabFood"]
+  },
+  "Shopee": {
+    "page_id": "100076379281555",
+    "url": "https://www.facebook.com/ShopeeVN",
+    "search_keywords": ["Shopee", "ShopeeVN", "Shopee lỗi"]
+  },
+  "ShopeePay": {
+    "page_id": "100068623501268",
+    "url": "https://www.facebook.com/ShopeePayVN",
+    "search_keywords": ["ShopeePay", "Shopee Pay", "ví ShopeePay"]
+  },
+  "VNPay": {
+    "page_id": "100069354641643",
+    "url": "https://www.facebook.com/VNPay.vn",
+    "search_keywords": ["VNPay", "VNPAY", "VNPay QR"]
+  },
+  "ViettelMoney": {
+    "page_id": "100068161508813",
+    "url": "https://www.facebook.com/ViettelMoney",
+    "search_keywords": ["Viettel Money", "ViettelMoney", "Viettel Pay"]
+  },
+  "Techcombank": {
+    "page_id": "100064895251803",
+    "url": "https://www.facebook.com/Techcombank",
+    "search_keywords": ["Techcombank", "TCB", "Techcombank lỗi"]
+  },
+  "VPBank": {
+    "page_id": "100064718194868",
+    "url": "https://www.facebook.com/VPBank",
+    "search_keywords": ["VPBank", "VP Bank"]
+  }
+}

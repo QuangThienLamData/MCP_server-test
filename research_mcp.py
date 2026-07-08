@@ -61,6 +61,14 @@ from tiktok_mcp import (
     track_kol, untrack_kol, get_tracked_kols,
 )
 
+# Facebook Intelligence
+from facebook_mcp import (
+    _init_fb_db,
+    search_facebook_mentions, get_facebook_post_comments,
+    get_brand_page_posts, get_facebook_sentiment,
+    search_facebook_ads, crawl_facebook, get_facebook_status,
+)
+
 load_dotenv()
 
 mcp = FastMCP(
@@ -842,6 +850,9 @@ for _fn in [
     get_kol_profile, get_kol_videos, analyze_kol, compare_kols,
     search_tiktok_users, get_hashtag_info,
     track_kol, untrack_kol, get_tracked_kols,
+    search_facebook_mentions, get_facebook_post_comments,
+    get_brand_page_posts, get_facebook_sentiment,
+    search_facebook_ads, crawl_facebook, get_facebook_status,
 ]:
     mcp.tool()(_fn)
 
@@ -854,6 +865,7 @@ def init_on_startup():
     _init_reviews_db()
     _init_kg_db()
     _init_tiktok_db()
+    _init_fb_db()
     auto_crawl_on_startup()
 
 
@@ -864,4 +876,5 @@ if __name__ == "__main__":
     _init_reviews_db()
     _init_kg_db()
     _init_tiktok_db()
+    _init_fb_db()
     mcp.run(transport="stdio")
