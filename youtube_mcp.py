@@ -9,10 +9,10 @@ import time
 from datetime import datetime, timezone
 
 import httpx
-import yt_dlp
 from dotenv import load_dotenv
 from mcp.server.fastmcp import FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
+from youtube_transcript_api import YouTubeTranscriptApi
 
 from rag_mcp import (
     DB_PATH, OPENAI_API_KEY, PINECONE_API_KEY,
@@ -126,77 +126,23 @@ def _yt_video_stats(video_ids: list[str]) -> dict[str, int]:
     return stats
 
 
-# --- Transcript extraction via yt-dlp ---
+# --- Transcript extraction via youtube-transcript-api ---
+_ytt_api = YouTubeTranscriptApi()
+
+
 def _extract_transcript(video_id: str, langs: list[str] | None = None) -> tuple[str, str] | None:
-    """Extract transcript from a YouTube video. Returns (text, lang) or None."""
+    """Extract transcript from a YouTube video using InnerTube API.
+    Returns (text, lang) or None."""
     if langs is None:
         langs = ["vi", "en"]
-    url = f"https://www.youtube.com/watch?v={video_id}"
-    ydl_opts = {
-        "skip_download": True,
-        "quiet": True,
-        "no_warnings": True,
-    }
     try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=False)
+        transcript = _ytt_api.fetch(video_id, languages=langs)
+        lang = transcript.language
+        text = " ".join(snippet.text.strip() for snippet in transcript if snippet.text.strip())
+        if text:
+            return text, lang
     except Exception as e:
-        logger.error(f"yt-dlp info failed for {video_id}: {e}")
-        return None
-
-    # Try manual subtitles first, then auto-generated
-    for sub_dict in [info.get("subtitles") or {}, info.get("automatic_captions") or {}]:
-        for lang in langs:
-            if lang not in sub_dict:
-                continue
-            # Prefer json3 format for structured text
-            for fmt in sub_dict[lang]:
-                if fmt.get("ext") == "json3":
-                    try:
-                        with httpx.Client(timeout=30) as c:
-                            r = c.get(fmt["url"])
-                            r.raise_for_status()
-                        events = r.json().get("events", [])
-                        texts = []
-                        for ev in events:
-                            for seg in ev.get("segs", []):
-                                t = seg.get("utf8", "").strip()
-                                if t and t != "\n":
-                                    texts.append(t)
-                        if texts:
-                            return " ".join(texts), lang
-                    except Exception as e:
-                        logger.warning(f"Subtitle download failed ({lang}): {e}")
-                        continue
-            # Fallback to vtt format
-            for fmt in sub_dict[lang]:
-                if fmt.get("ext") == "vtt":
-                    try:
-                        with httpx.Client(timeout=30) as c:
-                            r = c.get(fmt["url"])
-                            r.raise_for_status()
-                        # Parse VTT: strip timestamps and metadata
-                        lines = []
-                        for line in r.text.splitlines():
-                            line = line.strip()
-                            if not line or line.startswith("WEBVTT") or "-->" in line:
-                                continue
-                            if re.match(r"^\d+$", line):
-                                continue
-                            # Remove VTT tags
-                            clean = re.sub(r"<[^>]+>", "", line).strip()
-                            if clean:
-                                lines.append(clean)
-                        # Deduplicate consecutive identical lines (VTT repeats)
-                        deduped = []
-                        for ln in lines:
-                            if not deduped or ln != deduped[-1]:
-                                deduped.append(ln)
-                        if deduped:
-                            return " ".join(deduped), lang
-                    except Exception as e:
-                        logger.warning(f"VTT download failed ({lang}): {e}")
-                        continue
+        logger.error(f"Transcript fetch failed for {video_id}: {e}")
     return None
 
 
