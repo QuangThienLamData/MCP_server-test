@@ -74,7 +74,6 @@ def _yt_search(topic: str, max_results: int = 10, order: str = "viewCount") -> l
         "order": order,
         "maxResults": min(max_results, 50),
         "key": YOUTUBE_API_KEY,
-        "videoCaption": "closedCaption",  # only videos with captions
     }
     try:
         with httpx.Client(timeout=30) as c:
@@ -132,15 +131,29 @@ _ytt_api = YouTubeTranscriptApi()
 
 def _extract_transcript(video_id: str, langs: list[str] | None = None) -> tuple[str, str] | None:
     """Extract transcript from a YouTube video using InnerTube API.
-    Returns (text, lang) or None."""
+    Tries preferred languages first, then falls back to any available transcript
+    (including auto-generated). Returns (text, lang) or None."""
     if langs is None:
         langs = ["vi", "en"]
+    # 1. Try preferred languages
     try:
         transcript = _ytt_api.fetch(video_id, languages=langs)
-        lang = transcript.language
-        text = " ".join(snippet.text.strip() for snippet in transcript if snippet.text.strip())
+        text = " ".join(s.text.strip() for s in transcript if s.text.strip())
         if text:
-            return text, lang
+            return text, transcript.language
+    except Exception:
+        pass
+    # 2. Fall back to any available transcript (auto-generated included)
+    try:
+        available = _ytt_api.list(video_id)
+        for t in available:
+            try:
+                transcript = _ytt_api.fetch(video_id, languages=[t.language_code])
+                text = " ".join(s.text.strip() for s in transcript if s.text.strip())
+                if text:
+                    return text, t.language_code
+            except Exception:
+                continue
     except Exception as e:
         logger.error(f"Transcript fetch failed for {video_id}: {e}")
     return None
