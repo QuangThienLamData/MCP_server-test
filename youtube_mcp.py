@@ -30,6 +30,13 @@ CHUNK_SIZE = 1000
 CHUNK_OVERLAP = 200
 FALLBACK_SCORE_THRESHOLD = 0.40  # below this, fallback to YouTube API search
 
+# RapidAPI YouTube transcript fallback (for cloud IPs blocked by YouTube)
+# Subscribe to a YouTube transcript API on RapidAPI and set the host, e.g.:
+#   RAPIDAPI_YT_HOST=youtube-transcriptor.p.rapidapi.com
+# Uses the same RapidAPI key as TikTok/Facebook.
+RAPIDAPI_KEY = os.getenv("RAPIDAPI_TT_KEY", "") or os.getenv("RAPIDAPI_FB_KEY", "")
+RAPIDAPI_YT_HOST = os.getenv("RAPIDAPI_YT_HOST", "youtube-transcriptor.p.rapidapi.com")
+
 mcp = FastMCP(
     name="YouTube Intelligence MCP Server",
     transport_security=TransportSecuritySettings(enable_dns_rebinding_protection=False),
@@ -125,25 +132,41 @@ def _yt_video_stats(video_ids: list[str]) -> dict[str, int]:
     return stats
 
 
-# --- Transcript extraction via youtube-transcript-api ---
+# --- Transcript extraction ---
 _ytt_api = YouTubeTranscriptApi()
+_ip_blocked = False  # set True after first IP block detection, skip further direct attempts
 
 
-def _extract_transcript(video_id: str, langs: list[str] | None = None) -> tuple[str, str] | None:
-    """Extract transcript from a YouTube video using InnerTube API.
-    Tries preferred languages first, then falls back to any available transcript
-    (including auto-generated). Returns (text, lang) or None."""
-    if langs is None:
-        langs = ["vi", "en"]
+def _is_cloud_ip_block(exc: Exception) -> bool:
+    """Detect if the error is a permanent cloud IP block (not a temporary rate limit)."""
+    msg = str(exc)
+    cls = type(exc).__name__
+    # Cloud provider IP block: permanent, switch to RapidAPI
+    if "cloud provider" in msg.lower() or "IPBlocked" in cls:
+        return True
+    # Generic "blocking" + "IP" = likely cloud block
+    if "blocking" in msg.lower() and "ip" in msg.lower():
+        return True
+    return False
+
+
+def _extract_via_library(video_id: str, langs: list[str]) -> tuple[str, str] | None:
+    """Try youtube-transcript-api (direct, works from non-cloud IPs)."""
+    global _ip_blocked
+    if _ip_blocked:
+        return None
     # 1. Try preferred languages
     try:
         transcript = _ytt_api.fetch(video_id, languages=langs)
         text = " ".join(s.text.strip() for s in transcript if s.text.strip())
         if text:
             return text, transcript.language
-    except Exception:
-        pass
-    # 2. Fall back to any available transcript (auto-generated included)
+    except Exception as e:
+        if _is_cloud_ip_block(e):
+            _ip_blocked = True
+            logger.warning("YouTube cloud IP blocked — switching to RapidAPI for all future requests")
+            return None
+    # 2. Fall back to any available transcript
     try:
         available = _ytt_api.list(video_id)
         for t in available:
@@ -152,10 +175,89 @@ def _extract_transcript(video_id: str, langs: list[str] | None = None) -> tuple[
                 text = " ".join(s.text.strip() for s in transcript if s.text.strip())
                 if text:
                     return text, t.language_code
-            except Exception:
+            except Exception as e2:
+                if _is_cloud_ip_block(e2):
+                    _ip_blocked = True
+                    logger.warning("YouTube cloud IP blocked — switching to RapidAPI")
+                    return None
                 continue
     except Exception as e:
-        logger.error(f"Transcript fetch failed for {video_id}: {e}")
+        if _is_cloud_ip_block(e):
+            _ip_blocked = True
+            logger.warning("YouTube cloud IP blocked — switching to RapidAPI")
+        else:
+            logger.warning(f"Transcript unavailable for {video_id}: {type(e).__name__}")
+    return None
+
+
+def _extract_via_rapidapi(video_id: str, lang: str = "vi") -> tuple[str, str] | None:
+    """Fetch transcript via RapidAPI (works from cloud IPs).
+    Requires subscription to a YouTube transcript API on RapidAPI."""
+    if not RAPIDAPI_KEY or not RAPIDAPI_YT_HOST:
+        return None
+    headers = {
+        "x-rapidapi-key": RAPIDAPI_KEY,
+        "x-rapidapi-host": RAPIDAPI_YT_HOST,
+    }
+    with httpx.Client(timeout=30) as c:
+        for attempt in range(3):
+            try:
+                r = c.get(
+                    f"https://{RAPIDAPI_YT_HOST}/transcript",
+                    params={"video_id": video_id, "lang": lang},
+                    headers=headers,
+                )
+                if r.status_code == 429:
+                    wait = 2 ** (attempt + 1)
+                    logger.info(f"RapidAPI rate limited, waiting {wait}s...")
+                    time.sleep(wait)
+                    continue
+                if r.status_code in (403, 404):
+                    return None
+                r.raise_for_status()
+                data = r.json()
+            except httpx.HTTPStatusError:
+                return None
+            except Exception as e:
+                logger.warning(f"RapidAPI transcript failed for {video_id}: {e}")
+                return None
+
+            # Handle multiple response formats from different RapidAPI providers:
+            # Format 1: [{"text": "...", "start": ..., "duration": ...}, ...]
+            # Format 2: {"transcription": [{"subtitle": "...", ...}]}
+            segments = []
+            if isinstance(data, list):
+                segments = [s.get("text", "") for s in data]
+            elif isinstance(data, dict):
+                for s in data.get("transcription", data.get("subtitles", [])):
+                    segments.append(s.get("subtitle", s.get("text", "")))
+
+            text = " ".join(t.strip() for t in segments if t and t.strip())
+            if text:
+                return text, lang
+            return None
+    return None
+
+
+def _extract_transcript(video_id: str, langs: list[str] | None = None) -> tuple[str, str] | None:
+    """Extract transcript from a YouTube video.
+    Tries youtube-transcript-api first (direct), falls back to RapidAPI proxy
+    when YouTube blocks cloud IPs. Returns (text, lang) or None."""
+    if langs is None:
+        langs = ["vi", "en"]
+
+    # 1. Direct (fast, free, works from non-cloud IPs)
+    result = _extract_via_library(video_id, langs)
+    if result:
+        return result
+
+    # 2. RapidAPI fallback (works from cloud IPs)
+    if RAPIDAPI_KEY:
+        for lang in langs:
+            result = _extract_via_rapidapi(video_id, lang=lang)
+            if result:
+                return result
+
     return None
 
 
