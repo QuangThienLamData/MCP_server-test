@@ -31,8 +31,8 @@ CHUNK_OVERLAP = 200
 FALLBACK_SCORE_THRESHOLD = 0.40  # below this, fallback to YouTube API search
 
 # RapidAPI YouTube transcript fallback (for cloud IPs blocked by YouTube)
-# Subscribe to a YouTube transcript API on RapidAPI and set the host, e.g.:
-#   RAPIDAPI_YT_HOST=youtube-transcriptor.p.rapidapi.com
+# Uses "YouTube Transcriptor" API on RapidAPI (by benrhzala90).
+# Subscribe at: https://rapidapi.com/benrhzala90/api/youtube-transcriptor
 # Uses the same RapidAPI key as TikTok/Facebook.
 RAPIDAPI_KEY = os.getenv("RAPIDAPI_TT_KEY", "") or os.getenv("RAPIDAPI_FB_KEY", "")
 RAPIDAPI_YT_HOST = os.getenv("RAPIDAPI_YT_HOST", "youtube-transcriptor.p.rapidapi.com")
@@ -222,17 +222,24 @@ def _extract_via_rapidapi(video_id: str, lang: str = "vi") -> tuple[str, str] | 
                 logger.warning(f"RapidAPI transcript failed for {video_id}: {e}")
                 return None
 
-            # Handle multiple response formats from different RapidAPI providers:
-            # Format 1: [{"text": "...", "start": ..., "duration": ...}, ...]
-            # Format 2: {"transcription": [{"subtitle": "...", ...}]}
-            segments = []
-            if isinstance(data, list):
-                segments = [s.get("text", "") for s in data]
+            # youtube-transcriptor API returns:
+            # [{"transcriptionAsText": "full text...", "transcription": [{"subtitle":..}], ...}]
+            text = ""
+            if isinstance(data, list) and data and isinstance(data[0], dict):
+                item = data[0]
+                # Prefer the pre-joined text
+                text = item.get("transcriptionAsText", "")
+                # Fallback: join subtitle segments
+                if not text:
+                    segs = item.get("transcription", [])
+                    text = " ".join(s.get("subtitle", "") for s in segs if isinstance(s, dict))
             elif isinstance(data, dict):
-                for s in data.get("transcription", data.get("subtitles", [])):
-                    segments.append(s.get("subtitle", s.get("text", "")))
+                text = data.get("transcriptionAsText", "")
+                if not text:
+                    segs = data.get("transcription", data.get("subtitles", []))
+                    text = " ".join(s.get("subtitle", s.get("text", "")) for s in segs if isinstance(s, dict))
 
-            text = " ".join(t.strip() for t in segments if t and t.strip())
+            text = text.strip()
             if text:
                 return text, lang
             return None
