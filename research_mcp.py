@@ -37,6 +37,7 @@ from reviews_mcp import (
     _review_crawl_status, _init_reviews_db,
     _crawl_reviews_background,
     _review_insights_llm, _dist_str,
+    _quick_fetch_reviews, _format_live_reviews, _index_reviews,
 )
 
 # UX (Refero) tools — imported and re-registered below
@@ -580,16 +581,16 @@ def search_app_reviews(query: str, app: str = "", platform: str = "",
 
     best = matches[0].score if matches else 0.0
 
-    # Fallback: if VectorDB has weak/no results, search web for app reviews
-    if best < FALLBACK_SCORE_THRESHOLD and TAVILY_API_KEY:
-        app_hint = f" {app}" if app else ""
-        web_query = f"{query}{app_hint} app review Vietnam"
+    # Fallback: if VectorDB has weak/no results, fetch reviews directly from app stores
+    if best < FALLBACK_SCORE_THRESHOLD and app:
         try:
-            web = _tavily_search(web_query, max_results=top_k)
-            if web:
-                return _format_web_results(f"{query} (app reviews)", web)
+            live = _quick_fetch_reviews(app, platform=platform)
+            if live:
+                # Index in background
+                threading.Thread(target=_index_reviews, args=(live,), daemon=True).start()
+                return _format_live_reviews(query, live)
         except Exception as e:
-            logger.warning(f"Tavily review fallback failed: {e}")
+            logger.warning(f"Live review fetch failed: {e}")
 
     if not matches:
         return "No reviews found. Run crawl_reviews first."

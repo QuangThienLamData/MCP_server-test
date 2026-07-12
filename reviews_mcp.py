@@ -592,6 +592,55 @@ def _review_insights_llm(app: str, dist: dict, samples: list[dict], focus_area: 
         return ""
 
 
+# ============================ Live fetch + format (for search fallback) ============================
+
+def _quick_fetch_reviews(app_name: str, platform: str = "", count: int = 20) -> list[dict]:
+    """Fetch a small batch of recent reviews directly from app stores.
+    Returns normalized review dicts ready for display and indexing."""
+    apps = _load_apps()
+    cfg = apps.get(app_name, {})
+    if not cfg:
+        return []
+
+    results: list[dict] = []
+    targets = []
+    if platform:
+        aid = cfg.get(platform)
+        if aid:
+            targets.append((platform, aid))
+    else:
+        for plat in ("android", "ios"):
+            aid = cfg.get(plat)
+            if aid:
+                targets.append((plat, aid))
+
+    for plat, aid in targets:
+        try:
+            if plat == "android":
+                raw = gp_get_reviews(aid, "vi", "vn", Sort.NEWEST, count, None, False)
+                results.extend(_normalize_gp(r, app_name) for r in raw)
+            else:
+                raw = ios_get_reviews(int(aid), "vn", "recent", count, max_scan=100)
+                results.extend(_normalize_ios(r, app_name) for r in raw)
+        except Exception as e:
+            logger.warning(f"Quick fetch {app_name}/{plat} failed: {e}")
+
+    return [r for r in results if r.get("text") and len(r["text"]) >= 10]
+
+
+def _format_live_reviews(query: str, reviews: list[dict]) -> str:
+    """Format raw reviews for direct return to user (no VectorDB involved)."""
+    out = [f"Found {len(reviews)} app reviews (live fetch)\n"]
+    for i, r in enumerate(reviews[:20]):
+        rating = r.get("rating", 0)
+        out.append(
+            f"\n--- [{r.get('app', '?')}/{r.get('platform', '?')}] "
+            f"{'★' * rating}{'☆' * (5 - rating)} {r.get('review_date', '')} ---\n"
+            f"{(r.get('title') + chr(10)) if r.get('title') else ''}{r.get('text', '')}\n"
+        )
+    return "".join(out)
+
+
 # ============================ MCP Tools ============================
 @mcp.tool()
 def search_app_reviews(query: str, app: str = "", platform: str = "", rating_max: int = 0,
