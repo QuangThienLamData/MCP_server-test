@@ -269,20 +269,23 @@ def _extract_transcript(video_id: str, langs: list[str] | None = None) -> tuple[
 
 
 # --- Indexing engine ---
-def _index_video(video: dict, topic: str) -> bool:
-    """Extract transcript, chunk, embed, and store in Pinecone + SQLite."""
+def _index_video(video: dict, topic: str, pre_transcript: tuple[str, str] | None = None) -> bool:
+    """Chunk, embed, and store in Pinecone + SQLite.
+    If pre_transcript is given as (text, lang), skip transcript extraction."""
     video_id = video["video_id"]
     url = f"https://www.youtube.com/watch?v={video_id}"
 
     conn = sqlite3.connect(DB_PATH)
     existing = conn.execute("SELECT transcript_hash FROM youtube_videos WHERE id = ?", (video_id,)).fetchone()
 
-    result = _extract_transcript(video_id)
-    if not result:
-        conn.close()
-        return False
-
-    transcript, lang = result
+    if pre_transcript:
+        transcript, lang = pre_transcript
+    else:
+        result = _extract_transcript(video_id)
+        if not result:
+            conn.close()
+            return False
+        transcript, lang = result
     if len(transcript) < 50:
         conn.close()
         return False
@@ -423,9 +426,9 @@ def crawl_youtube_topic(
     return f"YouTube crawl started for '{topic}' (up to {max_videos} videos, order={order}). Use get_youtube_status to check progress."
 
 
-def _live_search_and_index(query: str, max_videos: int = 5) -> list[dict]:
-    """Search YouTube API, extract transcripts, index into Pinecone on the fly.
-    Returns list of video dicts that were successfully indexed."""
+def _live_search_and_extract(query: str, max_videos: int = 5) -> list[dict]:
+    """Search YouTube API, extract transcripts. Returns list of dicts with video info + transcript.
+    Does NOT index into Pinecone — caller decides whether to index (in background)."""
     _init_yt_db()
     videos = _yt_search(query, max_results=max_videos, order="relevance")
     if not videos:
@@ -434,15 +437,42 @@ def _live_search_and_index(query: str, max_videos: int = 5) -> list[dict]:
     for v in videos:
         v["view_count"] = stats.get(v["video_id"], 0)
 
-    indexed = []
+    results = []
     for v in videos:
         try:
-            if _index_video(v, query):
-                indexed.append(v)
+            result = _extract_transcript(v["video_id"])
+            if result:
+                text, lang = result
+                if len(text) >= 50:
+                    results.append({**v, "transcript": text, "lang": lang})
         except Exception:
-            logger.warning(f"Live index failed for {v['video_id']}")
+            logger.warning(f"Transcript failed for {v['video_id']}")
         time.sleep(1)
-    return indexed
+    return results
+
+
+def _format_live_results(query: str, results: list[dict]) -> str:
+    """Format live YouTube search results (with transcripts) for direct return."""
+    out = [f"Found {len(results)} YouTube videos for: '{query}' (live search)\n"]
+    for i, r in enumerate(results):
+        out.append(
+            f"\n--- Result {i + 1} ---\n"
+            f"Title: {r.get('title', '?')}\n"
+            f"Channel: {r.get('channel', '?')}\n"
+            f"URL: https://www.youtube.com/watch?v={r['video_id']}\n"
+            f"Views: {r.get('view_count', '?')}\n"
+            f"Transcript ({r['lang']}): {r['transcript'][:800]}\n"
+        )
+    return "".join(out)
+
+
+def _background_index_results(results: list[dict], topic: str):
+    """Background worker: index pre-extracted video results into Pinecone + SQLite."""
+    for r in results:
+        try:
+            _index_video(r, topic, pre_transcript=(r["transcript"], r["lang"]))
+        except Exception as e:
+            logger.warning(f"Background index failed for {r.get('video_id')}: {e}")
 
 
 def _format_matches(query: str, matches, source_label: str = "") -> str:
@@ -518,7 +548,7 @@ def search_video_content(
     if best_score >= FALLBACK_SCORE_THRESHOLD:
         return _format_matches(query, matches, "from indexed DB")
 
-    # Step 3: Fallback — search YouTube API, extract & index, then re-search
+    # Step 3: Fallback — search YouTube API, extract transcripts, return directly
     if not YOUTUBE_API_KEY:
         if matches:
             return _format_matches(query, matches, "from indexed DB — weak matches")
@@ -526,29 +556,23 @@ def search_video_content(
 
     logger.info(f"DB score {best_score:.3f} < {FALLBACK_SCORE_THRESHOLD}, falling back to YouTube API")
     try:
-        indexed = _live_search_and_index(query, max_videos=5)
+        extracted = _live_search_and_extract(query, max_videos=5)
     except Exception as e:
         logger.warning(f"YouTube fallback failed: {e}")
         if matches:
             return _format_matches(query, matches, "from indexed DB — weak matches")
         return f"No results in DB and YouTube fallback failed: {e}"
 
-    if not indexed:
+    if not extracted:
         if matches:
             return _format_matches(query, matches, "from indexed DB — weak matches")
         return "No results found in DB, and no YouTube videos with transcripts found for this query."
 
-    # Re-search DB now that new content is indexed
-    try:
-        matches = _search_db(query, top_k=top_k)
-    except Exception as e:
-        return f"Re-search error after indexing: {e}"
-
-    newly = ", ".join(v["title"][:40] for v in indexed[:3])
-    suffix = f"\n\n(Auto-indexed {len(indexed)} new video(s): {newly})"
-    if matches:
-        return _format_matches(query, matches, "after live YouTube indexing") + suffix
-    return f"Indexed {len(indexed)} video(s) but no transcript matches found.{suffix}"
+    # Return results directly, index in background
+    threading.Thread(
+        target=_background_index_results, args=(extracted, query), daemon=True,
+    ).start()
+    return _format_live_results(query, extracted)
 
 
 @mcp.tool()

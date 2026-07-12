@@ -498,6 +498,33 @@ def _sentiment_analysis(brand: str, comments: list[dict]) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Formatting helpers
+# ---------------------------------------------------------------------------
+
+def _format_live_posts(query: str, posts: list[dict]) -> str:
+    """Format raw Facebook API posts for direct return (no VectorDB involved)."""
+    out = [f"Found {len(posts)} Facebook posts for: '{query}' (live search)\n"]
+    for i, p in enumerate(posts[:15]):
+        msg = (p.get("message") or "")[:500]
+        author = (p.get("author") or {}).get("name", "?")
+        ts = _ts_to_iso(p.get("timestamp"))
+        reactions = p.get("reactions_count", 0)
+        comments = p.get("comments_count", 0)
+        url = p.get("url", "")
+        group = (p.get("associated_group") or {}).get("name", "")
+        out.append(
+            f"\n--- Post {i + 1} ---\n"
+            f"Author: {author}\n"
+            f"Date: {ts}\n"
+            f"URL: {url}\n"
+            f"Reactions: {reactions} | Comments: {comments}\n"
+            f"{'Group: ' + group + chr(10) if group else ''}"
+            f"{msg}\n"
+        )
+    return "".join(out)
+
+
+# ---------------------------------------------------------------------------
 # Tool functions (exported, registered by research_mcp.py)
 # ---------------------------------------------------------------------------
 
@@ -542,24 +569,20 @@ def search_facebook_mentions(
 
     best = matches[0].score if matches else 0.0
 
-    # Fallback: live search if DB has weak results
+    # Fallback: live search if DB has weak results — return directly, index in background
     if best < 0.35 and RAPIDAPI_KEY:
         try:
             live_posts = _search_public_posts(query, limit=10)
+            live_posts = [p for p in live_posts if len((p.get("message") or "").strip()) >= 10]
             if live_posts:
-                n = _index_posts(live_posts, brand or "unknown", source_type="search")
-                # Re-query after indexing
-                if n > 0:
-                    merged2: dict = {}
-                    for qvec in qvecs:
-                        res = index.query(
-                            vector=qvec, top_k=top_k, include_metadata=True,
-                            namespace=FB_NAMESPACE, filter=filters or None,
-                        )
-                        for m in res.matches:
-                            if m.id not in merged2 or m.score > merged2[m.id].score:
-                                merged2[m.id] = m
-                    matches = sorted(merged2.values(), key=lambda m: m.score, reverse=True)[:top_k]
+                # Index in background (don't block)
+                threading.Thread(
+                    target=_index_posts,
+                    args=(live_posts, brand or "unknown", "search"),
+                    daemon=True,
+                ).start()
+                # Return live results directly
+                return _format_live_posts(query, live_posts)
         except Exception as e:
             logger.warning(f"Facebook live fallback failed: {e}")
 

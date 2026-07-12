@@ -1,9 +1,12 @@
 """Unified Research MCP Server — combines Competitor Intelligence, Industry News,
 App Reviews, UX Patterns, and YouTube Intelligence into a single MCP endpoint."""
 
+import logging
 import sqlite3
 import threading
 from datetime import datetime, timedelta, timezone
+
+logger = logging.getLogger(__name__)
 
 from dotenv import load_dotenv
 from mcp.server.fastmcp import FastMCP
@@ -136,7 +139,11 @@ def search_competitor_content(
         try:
             web = _tavily_search(query)
             if web:
-                _index_tavily_results(web, competitor_name)
+                # Index in background, return results directly
+                threading.Thread(
+                    target=_index_tavily_results, args=(web, competitor_name),
+                    daemon=True,
+                ).start()
                 return _format_web_results(query, web)
         except Exception:
             pass
@@ -348,6 +355,28 @@ def search_industry_trends(query: str, topic: str = "", from_date: str = "",
             if m.id not in merged or m.score > merged[m.id].score:
                 merged[m.id] = m
     matches = sorted(merged.values(), key=lambda m: m.score, reverse=True)[:top_k]
+
+    best = matches[0].score if matches else 0.0
+
+    # Fallback: if VectorDB has weak/no results, try live news search
+    if best < FALLBACK_SCORE_THRESHOLD:
+        # Try GNews realtime first
+        if GNEWS_API_KEY:
+            try:
+                articles = _gnews_search(query, max_results=top_k)
+                if articles:
+                    return _format_articles(articles, f"Live news for '{query}' (not yet indexed)")
+            except Exception as e:
+                logger.warning(f"GNews fallback failed: {e}")
+        # Try Tavily web search as second fallback
+        if TAVILY_API_KEY:
+            try:
+                web = _tavily_search(query + " news", max_results=top_k)
+                if web:
+                    return _format_web_results(query, web)
+            except Exception as e:
+                logger.warning(f"Tavily news fallback failed: {e}")
+
     if not matches:
         return "No indexed news found. Run crawl_news first, or use search_news_realtime."
 
@@ -548,6 +577,20 @@ def search_app_reviews(query: str, app: str = "", platform: str = "",
             if m.id not in merged or m.score > merged[m.id].score:
                 merged[m.id] = m
     matches = sorted(merged.values(), key=lambda m: m.score, reverse=True)[:top_k]
+
+    best = matches[0].score if matches else 0.0
+
+    # Fallback: if VectorDB has weak/no results, search web for app reviews
+    if best < FALLBACK_SCORE_THRESHOLD and TAVILY_API_KEY:
+        app_hint = f" {app}" if app else ""
+        web_query = f"{query}{app_hint} app review Vietnam"
+        try:
+            web = _tavily_search(web_query, max_results=top_k)
+            if web:
+                return _format_web_results(f"{query} (app reviews)", web)
+        except Exception as e:
+            logger.warning(f"Tavily review fallback failed: {e}")
+
     if not matches:
         return "No reviews found. Run crawl_reviews first."
 
