@@ -13,7 +13,7 @@ from mcp.server.fastmcp import FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
 
 # Shared utilities (from the base RAG module)
-from rag_mcp import (
+from modules.rag import (
     DB_PATH, OPENAI_API_KEY, PINECONE_API_KEY, TAVILY_API_KEY,
     _bilingual_queries, _embed, _get_index,
     _init_db, _load_competitors, auto_crawl_on_startup,
@@ -24,7 +24,7 @@ from rag_mcp import (
 )
 
 # News internals
-from news_mcp import (
+from modules.news import (
     GNEWS_API_KEY, NEWS_NAMESPACE,
     _news_crawl_status, _init_news_db,
     _crawl_news_background,
@@ -32,7 +32,7 @@ from news_mcp import (
 )
 
 # Reviews internals
-from reviews_mcp import (
+from modules.reviews import (
     REVIEWS_NAMESPACE,
     _review_crawl_status, _init_reviews_db,
     _crawl_reviews_background,
@@ -41,24 +41,24 @@ from reviews_mcp import (
 )
 
 # UX (Refero) tools — imported and re-registered below
-from refero_mcp import (
+from modules.refero import (
     search_ux_patterns, search_user_flows, search_design_styles,
     get_ux_screen, get_ux_flow,
 )
 
 # YouTube tools — imported and re-registered below
-from youtube_mcp import (
+from modules.youtube import (
     search_video_content, crawl_youtube_topic, get_video_transcript,
     list_indexed_videos, get_youtube_status,
 )
 
 # Knowledge Graph
-from kg_extract import (
+from modules.kg import (
     _init_kg_db, search_kg, get_relationships, get_kg_stats,
 )
 
 # TikTok KOL Intelligence
-from tiktok_mcp import (
+from modules.tiktok import (
     _init_tiktok_db,
     get_kol_profile, get_kol_videos, analyze_kol, compare_kols,
     search_tiktok_users, get_hashtag_info,
@@ -66,7 +66,7 @@ from tiktok_mcp import (
 )
 
 # Facebook Intelligence
-from facebook_mcp import (
+from modules.facebook import (
     _init_fb_db,
     search_facebook_mentions, get_facebook_post_comments,
     get_brand_page_posts, get_facebook_sentiment,

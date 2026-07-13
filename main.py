@@ -4,8 +4,8 @@ from fastapi.responses import JSONResponse, Response
 import asyncio
 import httpx
 import logging
-import research_mcp
-from research_mcp import mcp as research_mcp_server, init_on_startup
+import modules.research as research_mcp
+from modules.research import mcp as research_mcp_server, init_on_startup
 import contextlib
 import os
 import uvicorn
@@ -172,7 +172,7 @@ async def internal_crawl(request: Request):
         topic = request.query_params.get("topic", "")
         if not topic:
             return JSONResponse(status_code=400, content={"error": "youtube target requires ?topic= param"})
-        from youtube_mcp import _init_yt_db
+        from modules.youtube import _init_yt_db
         _init_yt_db()
         out["youtube"] = research_mcp.crawl_youtube_topic(topic=topic)
     if not out:

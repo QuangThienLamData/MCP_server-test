@@ -23,7 +23,7 @@ from statistics import mean, stdev
 import httpx
 from dotenv import load_dotenv
 
-from rag_mcp import DB_PATH, OPENAI_API_KEY, _get_openai
+from modules.rag import DB_PATH, OPENAI_API_KEY, _get_openai
 
 load_dotenv()
 

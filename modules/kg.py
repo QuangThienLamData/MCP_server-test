@@ -11,7 +11,7 @@ import logging
 import sqlite3
 from datetime import datetime, timezone
 
-from rag_mcp import DB_PATH, OPENAI_API_KEY, PINECONE_API_KEY, _embed, _get_index, _get_openai
+from modules.rag import DB_PATH, OPENAI_API_KEY, PINECONE_API_KEY, _embed, _get_index, _get_openai
 
 logger = logging.getLogger(__name__)
 

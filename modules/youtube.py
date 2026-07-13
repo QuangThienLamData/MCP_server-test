@@ -14,7 +14,7 @@ from mcp.server.fastmcp import FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
 from youtube_transcript_api import YouTubeTranscriptApi
 
-from rag_mcp import (
+from modules.rag import (
     DB_PATH, OPENAI_API_KEY, PINECONE_API_KEY,
     _bilingual_queries, _chunk_text, _embed, _get_index,
 )

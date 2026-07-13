@@ -17,7 +17,7 @@ from mcp.server.transport_security import TransportSecuritySettings
 
 # Reuse shared infra from the RAG module: same Pinecone index (namespace app_reviews),
 # same OpenAI embedding + cross-lingual + language-detection helpers, same SQLite DB.
-from rag_mcp import (
+from modules.rag import (
     DB_PATH, OPENAI_API_KEY, PINECONE_API_KEY,
     _bilingual_queries, _detect_lang, _embed, _get_index, _get_openai,
 )
@@ -27,7 +27,7 @@ load_dotenv()
 logger = logging.getLogger(__name__)
 
 REVIEWS_NAMESPACE = "app_reviews"
-APPS_CONFIG = os.path.join(os.path.dirname(os.path.abspath(__file__)), "apps.json")
+APPS_CONFIG = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "config", "apps.json")
 VN_TZ = timezone(timedelta(hours=7))
 
 GP_APP_ID = "com.mservice.momotransfer"

@@ -15,7 +15,7 @@ from mcp.server.transport_security import TransportSecuritySettings
 
 # Reuse shared infra from the RAG module: same Pinecone index (different namespace),
 # same OpenAI embedding helper, same SQLite DB file.
-from rag_mcp import DB_PATH, OPENAI_API_KEY, PINECONE_API_KEY, _bilingual_queries, _detect_lang, _embed, _get_index
+from modules.rag import DB_PATH, OPENAI_API_KEY, PINECONE_API_KEY, _bilingual_queries, _detect_lang, _embed, _get_index
 
 load_dotenv()
 
@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 GNEWS_API_KEY = os.getenv("GNEWS_API_KEY", "")
 GNEWS_BASE = "https://gnews.io/api/v4"
 NEWS_NAMESPACE = "news_trends"
-NEWS_TOPICS_CONFIG = os.path.join(os.path.dirname(os.path.abspath(__file__)), "news_topics.json")
+NEWS_TOPICS_CONFIG = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "config", "news_topics.json")
 
 mcp = FastMCP(
     name="Industry News MCP Server",

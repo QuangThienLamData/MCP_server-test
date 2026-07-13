@@ -26,7 +26,7 @@ from dotenv import load_dotenv
 from mcp.server.fastmcp import FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
 
-from rag_mcp import (
+from modules.rag import (
     DB_PATH, OPENAI_API_KEY, PINECONE_API_KEY,
     _bilingual_queries, _embed, _get_index, _get_openai,
 )
@@ -39,7 +39,7 @@ RAPIDAPI_KEY = os.getenv("RAPIDAPI_FB_KEY", "")
 RAPIDAPI_HOST = "facebook-scraper3.p.rapidapi.com"
 RAPIDAPI_BASE = f"https://{RAPIDAPI_HOST}"
 FB_NAMESPACE = "facebook"
-FB_PAGES_FILE = os.path.join(os.path.dirname(__file__), "fb_pages.json")
+FB_PAGES_FILE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "config", "fb_pages.json")
 
 mcp = FastMCP(
     name="Facebook Intelligence MCP Server",

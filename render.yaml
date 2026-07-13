@@ -22,7 +22,7 @@ services:
     runtime: docker
     dockerfilePath: ./Dockerfile
     schedule: "0 0 * * *"
-    dockerCommand: uv run python cron_trigger.py all
+    dockerCommand: uv run python scripts/cron_trigger.py all
     envVars:
       - key: WEB_SERVICE_URL
         value: https://mcp-server-test-2soh.onrender.com
@@ -34,7 +34,7 @@ services:
     runtime: docker
     dockerfilePath: ./Dockerfile
     schedule: "0 12 * * *"
-    dockerCommand: uv run python cron_trigger.py news
+    dockerCommand: uv run python scripts/cron_trigger.py news
     envVars:
       - key: WEB_SERVICE_URL
         value: https://mcp-server-test-2soh.onrender.com

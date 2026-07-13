@@ -24,6 +24,10 @@ load_dotenv()
 
 logger = logging.getLogger(__name__)
 
+# --- Paths ---
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+CONFIG_DIR = os.path.join(PROJECT_ROOT, "config")
+
 # --- Config ---
 PINECONE_API_KEY = os.getenv("PINECONE_API_KEY", "")
 PINECONE_INDEX_NAME = os.getenv("PINECONE_INDEX_NAME", "competitor-content")
@@ -33,8 +37,8 @@ TAVILY_URL = "https://api.tavily.com/search"
 EMBEDDING_MODEL = "text-embedding-3-small"
 EMBEDDING_DIMENSION = 1536
 RENDER_SELF_URL = os.getenv("RENDER_EXTERNAL_URL", "")
-COMPETITORS_CONFIG = os.path.join(os.path.dirname(os.path.abspath(__file__)), "competitors.json")
-DB_PATH = os.getenv("DB_PATH", os.path.join(os.path.dirname(os.path.abspath(__file__)), "competitor_intel.db"))
+COMPETITORS_CONFIG = os.path.join(CONFIG_DIR, "competitors.json")
+DB_PATH = os.getenv("DB_PATH", os.path.join(PROJECT_ROOT, "competitor_intel.db"))
 
 CHUNK_SIZE = 1000
 CHUNK_OVERLAP = 200

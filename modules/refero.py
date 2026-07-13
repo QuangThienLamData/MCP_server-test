@@ -11,7 +11,7 @@ from mcp.server.transport_security import TransportSecuritySettings
 
 # Reuse the shared cross-lingual helpers (Refero is an English design DB, so Vietnamese
 # queries are translated to English before searching).
-from rag_mcp import _bilingual_queries, _detect_lang
+from modules.rag import _bilingual_queries, _detect_lang
 
 load_dotenv()
 
