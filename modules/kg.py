@@ -301,7 +301,7 @@ def extract_knowledge(text: str, competitor_name: str = "", source_url: str = ""
 
 def search_kg(query: str, entity_type: str = "", top_k: int = 10) -> list[dict]:
     """Search knowledge-graph entities by semantic similarity (bilingual)."""
-    from rag_mcp import _bilingual_queries
+    from modules.rag import _bilingual_queries
 
     variants = _bilingual_queries(query)
     qvecs = _embed(variants)
